@@ -28,6 +28,24 @@ variable "database_instance_class" {
   default     = "db.t4g.micro"
 }
 
+variable "rds_deletion_protection" {
+  description = "Whether RDS deletion protection is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "rds_skip_final_snapshot" {
+  description = "Skip RDS final snapshot on destroy"
+  type        = bool
+  default     = false
+}
+
+variable "s3_force_destroy" {
+  description = "Allow Terraform to delete non-empty S3 bucket"
+  type        = bool
+  default     = false
+}
+
 variable "app_image_identifier" {
   description = "ECR image URI with tag used by App Runner"
   type        = string

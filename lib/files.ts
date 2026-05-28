@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { getPool } from "@/lib/db";
@@ -13,17 +13,11 @@ export type SharedFile = {
   uploaded_at: string;
 };
 
-const memoryStore: SharedFile[] = [];
-let schemaReady = false;
+const metadataFilePath = path.join(process.cwd(), "uploads", "index.json");
 
 async function ensureSchema() {
-  if (schemaReady) {
-    return;
-  }
-
   const pool = getPool();
   if (!pool) {
-    schemaReady = true;
     return;
   }
 
@@ -37,7 +31,20 @@ async function ensureSchema() {
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
-  schemaReady = true;
+}
+
+async function readLocalMetadata() {
+  try {
+    const data = await readFile(metadataFilePath, "utf-8");
+    return JSON.parse(data) as SharedFile[];
+  } catch {
+    return [];
+  }
+}
+
+async function writeLocalMetadata(records: SharedFile[]) {
+  await mkdir(path.dirname(metadataFilePath), { recursive: true });
+  await writeFile(metadataFilePath, JSON.stringify(records, null, 2));
 }
 
 export async function listSharedFiles() {
@@ -45,7 +52,8 @@ export async function listSharedFiles() {
 
   const pool = getPool();
   if (!pool) {
-    return [...memoryStore].sort((a, b) => (a.uploaded_at < b.uploaded_at ? 1 : -1));
+    const records = await readLocalMetadata();
+    return records.sort((a, b) => (a.uploaded_at < b.uploaded_at ? 1 : -1));
   }
 
   const { rows } = await pool.query<SharedFile>(
@@ -64,10 +72,12 @@ export async function createSharedFile(params: {
   await ensureSchema();
 
   const id = randomUUID();
-  const safeName = path
-    .basename(params.file.name)
-    .replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storageKey = `${id}-${safeName}`;
+  const extension = path
+    .extname(path.basename(params.file.name))
+    .toLowerCase()
+    .replace(/[^a-z0-9.]/g, "");
+  const safeExtension = /^\.[a-z0-9]{1,9}$/.test(extension) ? extension : "";
+  const storageKey = `${id}${safeExtension}`;
 
   const uploadDir = path.join(process.cwd(), "uploads");
   await mkdir(uploadDir, { recursive: true });
@@ -85,7 +95,9 @@ export async function createSharedFile(params: {
 
   const pool = getPool();
   if (!pool) {
-    memoryStore.unshift(record);
+    const current = await readLocalMetadata();
+    current.unshift(record);
+    await writeLocalMetadata(current);
     return record;
   }
 

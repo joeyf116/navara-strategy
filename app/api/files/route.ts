@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { createSharedFile, listSharedFiles } from "@/lib/files";
 
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_FILE_BYTES = (Number(process.env.MAX_UPLOAD_SIZE_MB ?? 25) || 25) * 1024 * 1024;
 
 export async function GET() {
   try {
@@ -34,7 +34,11 @@ export async function POST(request: Request) {
 
     if (file.size === 0 || file.size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { error: "File must be between 1 byte and 25MB." },
+        {
+          error: `File must be between 1 byte and ${
+            MAX_FILE_BYTES / (1024 * 1024)
+          }MB.`,
+        },
         { status: 400 },
       );
     }

@@ -60,20 +60,30 @@ resource "aws_db_instance" "this" {
   max_allocated_storage  = 100
   db_name                = var.database_name
   engine                 = "postgres"
-  engine_version         = "16"
+  engine_version         = "16.1"
   instance_class         = var.database_instance_class
   username               = var.database_username
   password               = random_password.db.result
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
-  skip_final_snapshot    = true
-  deletion_protection    = false
+  skip_final_snapshot    = var.rds_skip_final_snapshot
+  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${var.project_name}-postgres-final"
+  deletion_protection    = var.rds_deletion_protection
+}
+
+resource "aws_secretsmanager_secret" "database_url" {
+  name = "${var.project_name}/database-url"
+}
+
+resource "aws_secretsmanager_secret_version" "database_url" {
+  secret_id = aws_secretsmanager_secret.database_url.id
+  secret_string = "postgres://${var.database_username}:${random_password.db.result}@${aws_db_instance.this.address}:${aws_db_instance.this.port}/${var.database_name}"
 }
 
 resource "aws_s3_bucket" "transfer" {
   bucket        = "${var.project_name}-${data.aws_caller_identity.current.account_id}"
-  force_destroy = false
+  force_destroy = var.s3_force_destroy
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "transfer" {
@@ -221,8 +231,11 @@ resource "aws_apprunner_service" "this" {
         port = "3000"
 
         runtime_environment_variables = {
-          NODE_ENV     = "production"
-          DATABASE_URL = "postgres://${var.database_username}:${random_password.db.result}@${aws_db_instance.this.address}:${aws_db_instance.this.port}/${var.database_name}"
+          NODE_ENV = "production"
+        }
+
+        runtime_environment_secrets = {
+          DATABASE_URL = aws_secretsmanager_secret.database_url.arn
         }
       }
     }

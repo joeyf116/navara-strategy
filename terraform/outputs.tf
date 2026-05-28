@@ -23,10 +23,9 @@ output "database_username" {
   description = "RDS username"
 }
 
-output "database_password" {
-  value       = random_password.db.result
-  description = "RDS password"
-  sensitive   = true
+output "database_url_secret_arn" {
+  value       = aws_secretsmanager_secret.database_url.arn
+  description = "Secrets Manager ARN containing DATABASE_URL for App Runner"
 }
 
 output "sftp_endpoint" {

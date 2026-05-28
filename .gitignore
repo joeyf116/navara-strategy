@@ -47,3 +47,6 @@ next-env.d.ts
 /.terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfvars
+crash.log
+.terraform.lock.hcl

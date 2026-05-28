@@ -3,21 +3,21 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Users,
-  FolderOpen,
-  Cog,
-  Activity,
-  AlertTriangle,
-  ClipboardList,
-  Heart,
-  Database,
-  Inbox,
-  Moon,
-  Sun,
-  LogOut,
-  Menu,
-  X,
+	LayoutDashboard,
+	Users,
+	FolderOpen,
+	Cog,
+	Activity,
+	AlertTriangle,
+	ClipboardList,
+	Heart,
+	Database,
+	Inbox,
+	Moon,
+	Sun,
+	LogOut,
+	Menu,
+	X,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,139 +29,136 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Tenants", href: "/tenants", icon: Users },
-  { name: "File Explorer", href: "/files", icon: FolderOpen },
-  { name: "Ingestion Jobs", href: "/ingestion", icon: Activity },
-  { name: "Queue Monitoring", href: "/queues", icon: Inbox },
-  { name: "Failed Processing", href: "/failed", icon: AlertTriangle },
-  { name: "Audit Logs", href: "/audit", icon: ClipboardList },
-  { name: "Service Health", href: "/health", icon: Heart },
-  { name: "Database Insights", href: "/database", icon: Database },
-  { name: "Settings", href: "/settings", icon: Cog },
+	{ name: "Dashboard", href: "/", icon: LayoutDashboard },
+	{ name: "Tenants", href: "/tenants", icon: Users },
+	{ name: "File Explorer", href: "/files", icon: FolderOpen },
+	{ name: "Ingestion Jobs", href: "/ingestion", icon: Activity },
+	{ name: "Queue Monitoring", href: "/queues", icon: Inbox },
+	{ name: "Failed Processing", href: "/failed", icon: AlertTriangle },
+	{ name: "Audit Logs", href: "/audit", icon: ClipboardList },
+	{ name: "Service Health", href: "/health", icon: Heart },
+	{ name: "Database Insights", href: "/database", icon: Database },
+	{ name: "Settings", href: "/settings", icon: Cog },
 ];
 
 export function DashboardSidebar() {
-  const pathname = usePathname();
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mobileOpen, setMobileOpen] = useState(false);
+	const pathname = usePathname();
+	const { theme, setTheme } = useTheme();
+	const [mobileOpen, setMobileOpen] = useState(false);
 
-  const sidebarContent = (
-    <>
-      <div className="flex h-14 items-center px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <span className="text-sm font-bold text-primary-foreground">N</span>
-          </div>
-          <span className="text-lg font-semibold">Navara</span>
-        </Link>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <Separator />
-      <ScrollArea className="flex-1 px-3 py-2">
-        <nav className="flex flex-col gap-1">
-          {navigation.map((item) => {
-            const isActive =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                )}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.name}
-              </Link>
-            );
-          })}
-        </nav>
-      </ScrollArea>
-      <Separator />
-      <div className="p-3 space-y-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full justify-start gap-2"
-          onClick={() => {
-            if (theme === "system") setTheme("dark");
-            else if (theme === "dark") setTheme("light");
-            else setTheme("system");
-          }}
-        >
-          {resolvedTheme === "dark" ? (
-            <Moon className="h-4 w-4" />
-          ) : (
-            <Sun className="h-4 w-4" />
-          )}
-          {theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}
-        </Button>
-        <div className="flex items-center gap-2 rounded-md px-3 py-2">
-          <Avatar className="h-8 w-8">
-            <AvatarFallback>SA</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <p className="truncate text-sm font-medium">Super Admin</p>
-            <p className="truncate text-xs text-muted-foreground">
-              superadmin@navara.io
-            </p>
-          </div>
-          <Button variant="outline" size="sm">
-            <LogOut className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
-    </>
-  );
+	const sidebarContent = (
+		<>
+			<div className="flex h-14 items-center px-4">
+				<Link href="/" className="flex items-center gap-2">
+					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+						<span className="text-sm font-bold text-primary-foreground">N</span>
+					</div>
+					<span className="text-lg font-semibold">Navara</span>
+				</Link>
+				<Button
+					variant="outline"
+					size="sm"
+					className="ml-auto lg:hidden"
+					onClick={() => setMobileOpen(false)}
+				>
+					<X className="h-4 w-4" />
+				</Button>
+			</div>
+			<Separator />
+			<ScrollArea className="flex-1 px-3 py-2">
+				<nav className="flex flex-col gap-1">
+					{navigation.map((item) => {
+						const isActive =
+							item.href === "/"
+								? pathname === "/"
+								: pathname.startsWith(item.href);
+						return (
+							<Link
+								key={item.name}
+								href={item.href}
+								onClick={() => setMobileOpen(false)}
+								className={cn(
+									"flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+									isActive
+										? "bg-accent text-accent-foreground"
+										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+								)}
+							>
+								<item.icon className="h-4 w-4" />
+								{item.name}
+							</Link>
+						);
+					})}
+				</nav>
+			</ScrollArea>
+			<Separator />
+			<div className="p-3 space-y-2">
+				<Button
+					variant="outline"
+					size="sm"
+					className="w-full justify-start gap-2"
+					onClick={() => {
+						if (theme === "system") setTheme("dark");
+						else if (theme === "dark") setTheme("light");
+						else setTheme("system");
+					}}
+				>
+					<Sun className="h-4 w-4 dark:hidden" />
+					<Moon className="h-4 w-4 hidden dark:block" />
+					{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}
+				</Button>
+				<div className="flex items-center gap-2 rounded-md px-3 py-2">
+					<Avatar className="h-8 w-8">
+						<AvatarFallback>SA</AvatarFallback>
+					</Avatar>
+					<div className="flex-1 min-w-0">
+						<p className="truncate text-sm font-medium">Super Admin</p>
+						<p className="truncate text-xs text-muted-foreground">
+							superadmin@navara.io
+						</p>
+					</div>
+					<Button variant="outline" size="sm">
+						<LogOut className="h-3.5 w-3.5" />
+					</Button>
+				</div>
+			</div>
+		</>
+	);
 
-  return (
-    <>
-      {/* Mobile menu button */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="fixed left-4 top-3 z-50 lg:hidden"
-        onClick={() => setMobileOpen(true)}
-      >
-        <Menu className="h-4 w-4" />
-      </Button>
+	return (
+		<>
+			{/* Mobile menu button */}
+			<Button
+				variant="outline"
+				size="sm"
+				className="fixed left-4 top-3 z-50 lg:hidden"
+				onClick={() => setMobileOpen(true)}
+			>
+				<Menu className="h-4 w-4" />
+			</Button>
 
-      {/* Mobile overlay */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+			{/* Mobile overlay */}
+			{mobileOpen && (
+				<div
+					className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
+					onClick={() => setMobileOpen(false)}
+				/>
+			)}
 
-      {/* Mobile sidebar */}
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card transition-transform lg:hidden",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-        )}
-      >
-        {sidebarContent}
-      </aside>
+			{/* Mobile sidebar */}
+			<aside
+				className={cn(
+					"fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card transition-transform lg:hidden",
+					mobileOpen ? "translate-x-0" : "-translate-x-full",
+				)}
+			>
+				{sidebarContent}
+			</aside>
 
-      {/* Desktop sidebar */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-border lg:bg-card">
-        {sidebarContent}
-      </aside>
-    </>
-  );
+			{/* Desktop sidebar */}
+			<aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-border lg:bg-card">
+				{sidebarContent}
+			</aside>
+		</>
+	);
 }

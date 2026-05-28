@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import {
   Card,
@@ -29,11 +30,12 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showDevLogin, setShowDevLogin] = useState(isDevMode);
+  const router = useRouter();
 
   async function handleOAuthSignIn() {
     setIsLoading(true);
     setError("");
-    await signIn("microsoft-entra-id", { callbackUrl: "/" });
+    await signIn("cognito", { callbackUrl: "/" });
   }
 
   async function handleDevSignIn(e: React.FormEvent) {
@@ -50,7 +52,7 @@ export default function LoginPage() {
     if (result?.error) {
       setError("Invalid credentials. Try one of the demo accounts below.");
     } else {
-      window.location.href = "/";
+      router.push("/");
     }
     setIsLoading(false);
   }
@@ -68,7 +70,7 @@ export default function LoginPage() {
     if (result?.error) {
       setError("Login failed.");
     } else {
-      window.location.href = "/";
+      router.push("/");
     }
     setIsLoading(false);
   }
@@ -106,18 +108,16 @@ export default function LoginPage() {
               >
                 <svg
                   className="mr-2 h-4 w-4"
-                  viewBox="0 0 21 21"
-                  fill="none"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
                   xmlns="http://www.w3.org/2000/svg"
                 >
-                  <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                  <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                  <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+                  <path d="M7.164 16.897l-1.39.738C7.36 19.791 9.552 21 12 21c1.73 0 3.456-.584 4.857-1.588l-1.326-.86A7.322 7.322 0 0 1 12 19.5a7.384 7.384 0 0 1-4.836-1.603Z" />
+                  <path d="M18.5 13.5c0-.644-.088-1.274-.248-1.875l7.398-3.327L12 1 .35 8.298l7.276 3.274A6.5 6.5 0 0 0 18.5 13.5Zm-6.5-9l8.026 4.997L12 14.494 3.974 9.497 12 4.5Z" />
                 </svg>
                 {isLoading
                   ? "Redirecting..."
-                  : "Sign in with Microsoft"}
+                  : "Sign in with AWS"}
               </Button>
               {error && <p className="text-sm text-destructive">{error}</p>}
             </CardContent>

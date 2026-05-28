@@ -1,5 +1,5 @@
 import NextAuth from "next-auth";
-import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import Cognito from "next-auth/providers/cognito";
 import Credentials from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers";
 import type { UserRole } from "@/lib/types";
@@ -66,22 +66,16 @@ const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === "true";
 function buildProviders(): Provider[] {
   const providers: Provider[] = [];
 
-  // Production: Microsoft Entra ID (Azure AD)
+  // Production: AWS Cognito
   if (
-    process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
-    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+    process.env.AUTH_COGNITO_ID &&
+    process.env.AUTH_COGNITO_SECRET
   ) {
     providers.push(
-      MicrosoftEntraID({
-        clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
-        clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
-        // Restrict login to a specific tenant, or omit for multi-tenant
-        ...(process.env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID && {
-          issuer: `https://login.microsoftonline.com/${process.env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID}/v2.0`,
-        }),
-        authorization: {
-          params: { scope: "openid profile email User.Read" },
-        },
+      Cognito({
+        clientId: process.env.AUTH_COGNITO_ID,
+        clientSecret: process.env.AUTH_COGNITO_SECRET,
+        issuer: process.env.AUTH_COGNITO_ISSUER,
       }),
     );
   }
@@ -119,7 +113,7 @@ function buildProviders(): Provider[] {
 }
 
 // Default role for users authenticated via OAuth.
-// TODO: Replace with a DB lookup or Azure AD group/claims mapping for
+// TODO: Replace with a DB lookup or Cognito group/claims mapping for
 // production RBAC. This default ensures new OAuth users have access while
 // the mapping is being configured.
 const DEFAULT_OAUTH_ROLE: UserRole = "admin";
@@ -133,9 +127,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (user.role) {
           token.role = user.role;
           token.tenantId = user.tenantId;
-        } else if (account?.provider === "microsoft-entra-id") {
+        } else if (account?.provider === "cognito") {
           // Production OAuth — assign default role
-          // Replace with a DB lookup or claims mapping for fine-grained RBAC
+          // Replace with a DB lookup or Cognito groups mapping for fine-grained RBAC
           token.role = DEFAULT_OAUTH_ROLE;
         }
       }

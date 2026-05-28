@@ -1,5 +1,7 @@
 import NextAuth from "next-auth";
+import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
+import type { Provider } from "next-auth/providers";
 import type { UserRole } from "@/lib/types";
 
 declare module "next-auth" {
@@ -25,7 +27,8 @@ declare module "@auth/core/jwt" {
   }
 }
 
-const DEMO_USERS = [
+// Dev mode demo users for local RBAC testing
+export const DEV_USERS = [
   {
     id: "1",
     name: "Super Admin",
@@ -57,36 +60,82 @@ const DEMO_USERS = [
   },
 ];
 
+const isDevMode = process.env.NEXT_PUBLIC_DEV_MODE === "true";
+
+// Build the list of providers based on environment
+function buildProviders(): Provider[] {
+  const providers: Provider[] = [];
+
+  // Production: Microsoft Entra ID (Azure AD)
+  if (
+    process.env.AUTH_MICROSOFT_ENTRA_ID_ID &&
+    process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET
+  ) {
+    providers.push(
+      MicrosoftEntraID({
+        clientId: process.env.AUTH_MICROSOFT_ENTRA_ID_ID,
+        clientSecret: process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
+        // Restrict login to a specific tenant, or omit for multi-tenant
+        ...(process.env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID && {
+          issuer: `https://login.microsoftonline.com/${process.env.AUTH_MICROSOFT_ENTRA_ID_TENANT_ID}/v2.0`,
+        }),
+        authorization: {
+          params: { scope: "openid profile email User.Read" },
+        },
+      }),
+    );
+  }
+
+  // Dev mode: Credentials provider for local RBAC testing
+  if (isDevMode) {
+    providers.push(
+      Credentials({
+        id: "dev-credentials",
+        name: "Dev Login",
+        credentials: {
+          email: { label: "Email", type: "email" },
+          password: { label: "Password", type: "password" },
+        },
+        async authorize(credentials) {
+          const user = DEV_USERS.find(
+            (u) =>
+              u.email === credentials?.email &&
+              u.password === credentials?.password,
+          );
+          if (!user) return null;
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            tenantId: user.tenantId,
+          };
+        },
+      }),
+    );
+  }
+
+  return providers;
+}
+
+// Default role for users authenticated via OAuth (can be overridden by
+// a database lookup or claims mapping in production)
+const DEFAULT_OAUTH_ROLE: UserRole = "admin";
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  providers: [
-    Credentials({
-      name: "Demo Login",
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        const user = DEMO_USERS.find(
-          (u) =>
-            u.email === credentials?.email &&
-            u.password === credentials?.password,
-        );
-        if (!user) return null;
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          tenantId: user.tenantId,
-        };
-      },
-    }),
-  ],
+  providers: buildProviders(),
   callbacks: {
-    jwt({ token, user }) {
+    jwt({ token, user, account }) {
       if (user) {
-        token.role = user.role;
-        token.tenantId = user.tenantId;
+        // Dev credentials already have role set
+        if (user.role) {
+          token.role = user.role;
+          token.tenantId = user.tenantId;
+        } else if (account?.provider === "microsoft-entra-id") {
+          // Production OAuth — assign default role
+          // Replace with a DB lookup or claims mapping for fine-grained RBAC
+          token.role = DEFAULT_OAUTH_ROLE;
+        }
       }
       return token;
     },
@@ -98,6 +147,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   },
   pages: {
     signIn: "/login",
+  },
+  session: {
+    strategy: "jwt",
   },
   secret:
     process.env.NEXTAUTH_SECRET ?? "navara-dev-secret-change-in-production",

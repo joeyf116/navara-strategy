@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 import {
 	LayoutDashboard,
 	Users,
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -49,10 +51,38 @@ const navigation = [
 	{ name: "Settings", href: "/settings", icon: Cog },
 ];
 
+function roleBadgeLabel(role: string | undefined): string {
+	switch (role) {
+		case "super_admin":
+			return "Super Admin";
+		case "admin":
+			return "Admin";
+		case "tenant_user":
+			return "Tenant";
+		case "read_only_auditor":
+			return "Auditor";
+		default:
+			return "User";
+	}
+}
+
+function getInitials(name: string | undefined | null): string {
+	if (!name) return "U";
+	return name
+		.split(" ")
+		.map((n) => n[0])
+		.join("")
+		.toUpperCase()
+		.slice(0, 2);
+}
+
 export function DashboardSidebar() {
 	const pathname = usePathname();
 	const { theme, setTheme } = useTheme();
+	const { data: session } = useSession();
 	const [mobileOpen, setMobileOpen] = useState(false);
+
+	const user = session?.user;
 
 	const sidebarContent = (
 		<>
@@ -117,15 +147,27 @@ export function DashboardSidebar() {
 				</Button>
 				<div className="flex items-center gap-2 rounded-md px-3 py-2">
 					<Avatar className="h-8 w-8">
-						<AvatarFallback>SA</AvatarFallback>
+						<AvatarFallback>{getInitials(user?.name)}</AvatarFallback>
 					</Avatar>
 					<div className="flex-1 min-w-0">
-						<p className="truncate text-sm font-medium">Super Admin</p>
-						<p className="truncate text-xs text-muted-foreground">
-							superadmin@navara.io
+						<p className="truncate text-sm font-medium">
+							{user?.name ?? "User"}
 						</p>
+						<div className="flex items-center gap-1.5">
+							<p className="truncate text-xs text-muted-foreground">
+								{user?.email ?? ""}
+							</p>
+						</div>
+						<Badge variant="outline" className="mt-0.5 text-[10px] px-1.5 py-0">
+							{roleBadgeLabel(user?.role)}
+						</Badge>
 					</div>
-					<Button variant="outline" size="sm">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => signOut({ callbackUrl: "/login" })}
+						title="Sign out"
+					>
 						<LogOut className="h-3.5 w-3.5" />
 					</Button>
 				</div>

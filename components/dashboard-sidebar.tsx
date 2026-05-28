@@ -18,6 +18,10 @@ import {
 	LogOut,
 	Menu,
 	X,
+	ShieldAlert,
+	FileCheck,
+	ArrowRightLeft,
+	Upload,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -32,7 +36,11 @@ const navigation = [
 	{ name: "Dashboard", href: "/", icon: LayoutDashboard },
 	{ name: "Tenants", href: "/tenants", icon: Users },
 	{ name: "File Explorer", href: "/files", icon: FolderOpen },
+	{ name: "Web Uploads", href: "/uploads", icon: Upload },
 	{ name: "Ingestion Jobs", href: "/ingestion", icon: Activity },
+	{ name: "Validation", href: "/validation", icon: FileCheck },
+	{ name: "Anomaly Detection", href: "/anomalies", icon: ShieldAlert },
+	{ name: "Reconciliation", href: "/reconciliation", icon: ArrowRightLeft },
 	{ name: "Queue Monitoring", href: "/queues", icon: Inbox },
 	{ name: "Failed Processing", href: "/failed", icon: AlertTriangle },
 	{ name: "Audit Logs", href: "/audit", icon: ClipboardList },

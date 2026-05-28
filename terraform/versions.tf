@@ -21,10 +21,10 @@ terraform {
   #     --billing-mode PAY_PER_REQUEST
   #
   # backend "s3" {
-  #   bucket         = "navara-sftp-terraform-state"
-  #   key            = "navara-sftp/terraform.tfstate"
+  #   bucket         = "<project-name>-terraform-state"
+  #   key            = "<project-name>/terraform.tfstate"
   #   region         = "us-east-1"
-  #   dynamodb_table = "navara-sftp-terraform-locks"
+  #   dynamodb_table = "<project-name>-terraform-locks"
   #   encrypt        = true
   # }
 }

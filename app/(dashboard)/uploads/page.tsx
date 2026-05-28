@@ -79,7 +79,11 @@ export default function WebUploadsPage() {
 
 	function validateFileSelection(fileList: File[]): string | null {
 		for (const file of fileList) {
-			const ext = "." + file.name.split(".").pop()?.toLowerCase();
+			const dotIndex = file.name.lastIndexOf(".");
+			if (dotIndex === -1 || dotIndex === file.name.length - 1) {
+				return `File "${file.name}" has no valid extension. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
+			}
+			const ext = file.name.slice(dotIndex).toLowerCase();
 			if (!ALLOWED_EXTENSIONS.includes(ext)) {
 				return `File type "${ext}" is not supported. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
 			}

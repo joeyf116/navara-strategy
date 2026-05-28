@@ -4,7 +4,7 @@ export type ReconciliationStatus = "matched" | "mismatched" | "missing_source" |
 
 export type ReconciliationRecord = {
   id: string;
-  sourceId: string;
+  sourceId: string | null;
   targetId: string | null;
   field: string;
   sourceValue: string;
@@ -107,7 +107,7 @@ export function getReconciliationJobs(): ReconciliationJob[] {
       records: [
         { id: "rec-003-1", sourceId: "CLT-3040", targetId: "CLT-3040", field: "account_id", sourceValue: "", targetValue: "ACC-99001", status: "mismatched", discrepancy: "Source record missing account_id - ingestion validation failure" },
         { id: "rec-003-2", sourceId: "CLT-3055", targetId: null, field: "client_id", sourceValue: "CLT-3055", targetValue: null, status: "missing_target", discrepancy: "Record failed ingestion due to schema validation error" },
-        { id: "rec-003-3", sourceId: null as unknown as string, targetId: "CLT-2001", field: "client_id", sourceValue: "N/A", targetValue: "CLT-2001", status: "missing_source", discrepancy: "Record exists in target but was not in latest source file" },
+        { id: "rec-003-3", sourceId: null, targetId: "CLT-2001", field: "client_id", sourceValue: "N/A", targetValue: "CLT-2001", status: "missing_source", discrepancy: "Record exists in target but was not in latest source file" },
       ],
     },
     {

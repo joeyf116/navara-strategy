@@ -94,6 +94,81 @@ resource "aws_db_instance" "this" {
 }
 
 # -----------------------------------------------------------------------------
+# Cognito – authentication
+# -----------------------------------------------------------------------------
+
+resource "aws_cognito_user_pool" "this" {
+  name = "${var.project_name}-users"
+
+  username_attributes      = ["email"]
+  auto_verified_attributes = ["email"]
+
+  password_policy {
+    minimum_length    = 8
+    require_uppercase = true
+    require_lowercase = true
+    require_numbers   = true
+    require_symbols   = false
+  }
+
+  schema {
+    name                = "email"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
+  schema {
+    name                = "name"
+    attribute_data_type = "String"
+    required            = true
+    mutable             = true
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 256
+    }
+  }
+
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
+    }
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cognito_user_pool_client" "this" {
+  name         = "${var.project_name}-web-client"
+  user_pool_id = aws_cognito_user_pool.this.id
+
+  generate_secret                      = true
+  allowed_oauth_flows_user_pool_client = true
+  allowed_oauth_flows                  = ["code"]
+  allowed_oauth_scopes                 = ["openid", "email", "profile"]
+  supported_identity_providers         = ["COGNITO"]
+  callback_urls                        = var.cognito_callback_urls
+  logout_urls                          = var.cognito_logout_urls
+
+  explicit_auth_flows = [
+    "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH",
+  ]
+}
+
+resource "aws_cognito_user_pool_domain" "this" {
+  domain       = var.cognito_domain
+  user_pool_id = aws_cognito_user_pool.this.id
+}
+
+# -----------------------------------------------------------------------------
 # Secrets Manager
 # -----------------------------------------------------------------------------
 
@@ -122,6 +197,28 @@ resource "aws_secretsmanager_secret" "nextauth_secret" {
 resource "aws_secretsmanager_secret_version" "nextauth_secret" {
   secret_id     = aws_secretsmanager_secret.nextauth_secret.id
   secret_string = random_password.nextauth_secret.result
+}
+
+resource "aws_secretsmanager_secret" "cognito_client_id" {
+  name = "${var.project_name}/cognito-client-id"
+
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "cognito_client_id" {
+  secret_id     = aws_secretsmanager_secret.cognito_client_id.id
+  secret_string = aws_cognito_user_pool_client.this.id
+}
+
+resource "aws_secretsmanager_secret" "cognito_client_secret" {
+  name = "${var.project_name}/cognito-client-secret"
+
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "cognito_client_secret" {
+  secret_id     = aws_secretsmanager_secret.cognito_client_secret.id
+  secret_string = aws_cognito_user_pool_client.this.client_secret
 }
 
 # -----------------------------------------------------------------------------
@@ -379,7 +476,9 @@ resource "aws_iam_role_policy" "apprunner_instance" {
         ]
         Resource = [
           aws_secretsmanager_secret.database_url.arn,
-          aws_secretsmanager_secret.nextauth_secret.arn
+          aws_secretsmanager_secret.nextauth_secret.arn,
+          aws_secretsmanager_secret.cognito_client_id.arn,
+          aws_secretsmanager_secret.cognito_client_secret.arn
         ]
       },
       {
@@ -447,12 +546,15 @@ resource "aws_apprunner_service" "this" {
         port = "3000"
 
         runtime_environment_variables = {
-          NODE_ENV = "production"
+          NODE_ENV             = "production"
+          AUTH_COGNITO_ISSUER  = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
         }
 
         runtime_environment_secrets = {
-          DATABASE_URL    = aws_secretsmanager_secret.database_url.arn
-          NEXTAUTH_SECRET = aws_secretsmanager_secret.nextauth_secret.arn
+          DATABASE_URL         = aws_secretsmanager_secret.database_url.arn
+          NEXTAUTH_SECRET      = aws_secretsmanager_secret.nextauth_secret.arn
+          AUTH_COGNITO_ID      = aws_secretsmanager_secret.cognito_client_id.arn
+          AUTH_COGNITO_SECRET  = aws_secretsmanager_secret.cognito_client_secret.arn
         }
       }
     }

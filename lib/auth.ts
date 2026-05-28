@@ -118,8 +118,10 @@ function buildProviders(): Provider[] {
   return providers;
 }
 
-// Default role for users authenticated via OAuth (can be overridden by
-// a database lookup or claims mapping in production)
+// Default role for users authenticated via OAuth.
+// TODO: Replace with a DB lookup or Azure AD group/claims mapping for
+// production RBAC. This default ensures new OAuth users have access while
+// the mapping is being configured.
 const DEFAULT_OAUTH_ROLE: UserRole = "admin";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -151,8 +153,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   session: {
     strategy: "jwt",
   },
-  secret:
-    process.env.NEXTAUTH_SECRET ?? "navara-dev-secret-change-in-production",
+  secret: isDevMode
+    ? (process.env.NEXTAUTH_SECRET ?? "navara-dev-secret-change-in-production")
+    : process.env.NEXTAUTH_SECRET,
 });
 
 // RBAC helper

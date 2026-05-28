@@ -70,6 +70,7 @@ function getInitials(name: string | undefined | null): string {
 	if (!name) return "U";
 	return name
 		.split(" ")
+		.filter((n) => n.length > 0)
 		.map((n) => n[0])
 		.join("")
 		.toUpperCase()

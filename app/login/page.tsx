@@ -55,25 +55,22 @@ export default function LoginPage() {
     setIsLoading(false);
   }
 
-  function handleQuickLogin(accountEmail: string) {
+  async function handleQuickLogin(accountEmail: string) {
     setEmail(accountEmail);
     setPassword("demo");
-    // Auto-submit after a tick so state updates
-    setTimeout(async () => {
-      setIsLoading(true);
-      setError("");
-      const result = await signIn("dev-credentials", {
-        email: accountEmail,
-        password: "demo",
-        redirect: false,
-      });
-      if (result?.error) {
-        setError("Login failed.");
-      } else {
-        window.location.href = "/";
-      }
-      setIsLoading(false);
-    }, 0);
+    setIsLoading(true);
+    setError("");
+    const result = await signIn("dev-credentials", {
+      email: accountEmail,
+      password: "demo",
+      redirect: false,
+    });
+    if (result?.error) {
+      setError("Login failed.");
+    } else {
+      window.location.href = "/";
+    }
+    setIsLoading(false);
   }
 
   return (

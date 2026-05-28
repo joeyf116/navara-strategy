@@ -1,10 +1,32 @@
 aws_region              = "us-east-1"
 project_name            = "navara-sftp"
+environment             = "production"
+
+# RDS
 database_name           = "navara"
 database_username       = "navara_admin"
+database_instance_class = "db.t4g.micro"
 rds_deletion_protection = true
 rds_skip_final_snapshot = false
+
+# S3
 s3_force_destroy        = false
+
+# ECR
+ecr_force_delete        = false
+ecr_max_image_count     = 30
+
+# App Runner
 app_image_identifier    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:latest"
+apprunner_cpu           = "256"
+apprunner_memory        = "512"
+apprunner_max_concurrency = 100
+apprunner_max_size      = 3
+apprunner_min_size      = 1
+
+# Transfer Family (SFTP)
 transfer_user_name      = "client-upload"
 transfer_user_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+
+# Observability
+log_retention_days      = 30

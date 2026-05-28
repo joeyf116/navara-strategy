@@ -1,0 +1,7 @@
+aws_region              = "us-east-1"
+project_name            = "navara-sftp"
+database_name           = "navara"
+database_username       = "navara_admin"
+app_image_identifier    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:latest"
+transfer_user_name      = "client-upload"
+transfer_user_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."

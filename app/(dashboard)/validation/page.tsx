@@ -11,6 +11,7 @@ import {
 	Clock,
 	Search,
 	ToggleLeft,
+	TrendingUp,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -77,7 +78,7 @@ export default function ValidationPage() {
 						Intelligent validation rules for ingested data
 					</p>
 				</div>
-				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
 					{Array.from({ length: 4 }).map((_, i) => (
 						<Card key={i}>
 							<CardContent className="p-4">
@@ -151,15 +152,38 @@ export default function ValidationPage() {
 					<CardContent className="p-4">
 						<div className="flex items-center justify-between">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">Avg Validation Time</p>
-								<p className="text-2xl font-bold">{(summary.avgValidationTimeMs / 1000).toFixed(1)}s</p>
+								<p className="text-xs font-medium text-muted-foreground">With Warnings</p>
+								<p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{summary.withWarnings}</p>
 							</div>
-							<div className="rounded-lg bg-muted p-2.5">
-								<Clock className="h-5 w-5 text-muted-foreground" />
+							<div className="rounded-lg bg-yellow-500/10 p-2.5">
+								<AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
 							</div>
 						</div>
 					</CardContent>
 				</Card>
+				<Card>
+					<CardContent className="p-4">
+						<div className="flex items-center justify-between">
+							<div className="space-y-1">
+								<p className="text-xs font-medium text-muted-foreground">Pass Rate</p>
+								<p className="text-2xl font-bold">{summary.passRate}%</p>
+							</div>
+							<div className="rounded-lg bg-green-500/10 p-2.5">
+								<TrendingUp className="h-5 w-5 text-green-600 dark:text-green-400" />
+							</div>
+						</div>
+					</CardContent>
+				</Card>
+			</div>
+
+			<div className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 text-sm">
+				<div className="flex items-center gap-1.5 text-muted-foreground">
+					<Clock className="h-4 w-4" />
+					Avg validation time: <span className="font-medium text-foreground">{(summary.avgValidationTimeMs / 1000).toFixed(1)}s</span>
+				</div>
+				<div className="text-muted-foreground">
+					Total surfaced findings: <span className="font-medium text-foreground">{summary.totalErrors}</span>
+				</div>
 			</div>
 
 			{/* Common errors */}

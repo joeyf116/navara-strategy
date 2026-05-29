@@ -4,6 +4,15 @@ Next.js Operational Insights & Platform Health Portal with SFTP file-share hub, 
 
 ## What this includes
 
+### Existing Features
+
+- AI-based anomaly detection dashboard with severity-based triage (`/anomalies`)
+- Intelligent ingestion validation with rule inventory and result drill-down (`/validation`)
+- Automated reconciliation tracking with discrepancy visibility (`/reconciliation`)
+- Web-based uploads with drag/drop UI and API-backed file persistence (`/uploads`, `POST /api/files`)
+- SFTP file-share upload hub (`/upload`)
+- Operational insights portal with tenant, ingestion, queue, failed-processing, audit, health, database, and settings surfaces
+
 ### SFTP File Share Hub (`/upload`)
 
 - Client upload hub with shadcn-style `Card`, `Input`, `Button`, and `Table` components.
@@ -362,11 +371,9 @@ The deploy workflow uses **GitHub OIDC** — no long-lived AWS access keys are s
 
 The platform is architected to support:
 
-- AI-based anomaly detection
-- Intelligent ingestion validation
-- Automated reconciliation
-- Web-based uploads
 - Analytics warehouse exports
 - Real-time event streaming (SSE/WebSocket)
 - MCP integrations
 - RAG/document indexing
+- Predictive capacity and queue forecasting
+- Auto-remediation playbooks for common ingestion failures

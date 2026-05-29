@@ -57,6 +57,8 @@ export type ValidationSummary = {
   passed: number;
   failed: number;
   withWarnings: number;
+  passRate: number;
+  totalErrors: number;
   avgValidationTimeMs: number;
   commonErrors: { rule: string; count: number }[];
   recentResults: ValidationResult[];
@@ -289,6 +291,8 @@ export function getValidationSummary(): ValidationSummary {
   const failed = results.filter((r) => r.status === "failed").length;
   const withWarnings = results.filter((r) => r.status === "warnings").length;
   const avgTime = results.reduce((sum, r) => sum + r.duration, 0) / results.length;
+  const totalErrors = results.reduce((sum, r) => sum + r.errors.length, 0);
+  const passRate = results.length > 0 ? Math.round((passed / results.length) * 1000) / 10 : 0;
 
   // Count common errors across all results
   const errorCounts: Record<string, number> = {};
@@ -308,6 +312,8 @@ export function getValidationSummary(): ValidationSummary {
     passed,
     failed,
     withWarnings,
+    passRate,
+    totalErrors,
     avgValidationTimeMs: Math.round(avgTime),
     commonErrors,
     recentResults: results,

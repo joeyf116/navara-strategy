@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useRef } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Upload,
 	FileText,
@@ -9,19 +10,13 @@ import {
 	Trash2,
 	FileUp,
 	X,
+	Clock,
 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import {
 	Table,
 	TableBody,
@@ -30,16 +25,19 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type UploadedFile = {
+type SharedFile = {
 	id: string;
-	name: string;
-	size: number;
-	uploadedBy: string;
-	tenant: string;
-	status: "uploading" | "uploaded" | "validating" | "validated" | "failed";
-	uploadedAt: string;
-	validationErrors: number;
+	original_name: string;
+	storage_key: string;
+	size_bytes: number;
+	uploaded_by: string;
+	uploaded_at: string;
+};
+
+type FilesResponse = {
+	files: SharedFile[];
 };
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".json", ".xml", ".pdf", ".txt", ".dat"];
@@ -51,51 +49,50 @@ function formatFileSize(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Mock initial uploaded files
-function getInitialFiles(): UploadedFile[] {
-	const now = Date.now();
-	return [
-		{ id: "up-001", name: "transactions_2024_q4.csv", size: 15200000, uploadedBy: "Admin User", tenant: "Acme Corporation", status: "validated", uploadedAt: new Date(now - 300000).toISOString(), validationErrors: 0 },
-		{ id: "up-002", name: "payroll_batch_dec.xlsx", size: 8400000, uploadedBy: "Admin User", tenant: "GlobalTech Industries", status: "validated", uploadedAt: new Date(now - 3600000).toISOString(), validationErrors: 3 },
-		{ id: "up-003", name: "client_data_export.json", size: 2100000, uploadedBy: "Tenant User", tenant: "Sterling Partners", status: "failed", uploadedAt: new Date(now - 7200000).toISOString(), validationErrors: 5 },
-		{ id: "up-004", name: "invoice_batch_001.csv", size: 4500000, uploadedBy: "Admin User", tenant: "Acme Corporation", status: "uploaded", uploadedAt: new Date(now - 120000).toISOString(), validationErrors: 0 },
-		{ id: "up-005", name: "vendor_payments.csv", size: 6200000, uploadedBy: "Admin User", tenant: "Vanguard Analytics", status: "validated", uploadedAt: new Date(now - 14400000).toISOString(), validationErrors: 0 },
-	];
+function validateFileSelection(fileList: File[]): string | null {
+	for (const file of fileList) {
+		const dotIndex = file.name.lastIndexOf(".");
+		if (dotIndex === -1 || dotIndex === file.name.length - 1) {
+			return `File "${file.name}" has no valid extension. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
+		}
+		const ext = file.name.slice(dotIndex).toLowerCase();
+		if (!ALLOWED_EXTENSIONS.includes(ext)) {
+			return `File type "${ext}" is not supported. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
+		}
+		if (file.size > MAX_FILE_SIZE) {
+			return `File "${file.name}" exceeds the maximum size of ${formatFileSize(MAX_FILE_SIZE)}.`;
+		}
+		if (file.size === 0) {
+			return `File "${file.name}" is empty.`;
+		}
+	}
+	return null;
 }
 
 export default function WebUploadsPage() {
-	const [files, setFiles] = useState<UploadedFile[]>(getInitialFiles);
 	const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 	const [uploadedBy, setUploadedBy] = useState("");
-	const [tenant, setTenant] = useState("");
 	const [status, setStatus] = useState("");
 	const [isUploading, setIsUploading] = useState(false);
 	const [dragActive, setDragActive] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const queryClient = useQueryClient();
 
-	const totalUploaded = useMemo(() => files.length, [files]);
-	const totalValidated = useMemo(() => files.filter((f) => f.status === "validated").length, [files]);
-	const totalFailed = useMemo(() => files.filter((f) => f.status === "failed").length, [files]);
+	const { data, isLoading } = useQuery<FilesResponse>({
+		queryKey: ["uploads"],
+		queryFn: () => fetch("/api/files").then((r) => r.json()),
+	});
 
-	function validateFileSelection(fileList: File[]): string | null {
-		for (const file of fileList) {
-			const dotIndex = file.name.lastIndexOf(".");
-			if (dotIndex === -1 || dotIndex === file.name.length - 1) {
-				return `File "${file.name}" has no valid extension. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
-			}
-			const ext = file.name.slice(dotIndex).toLowerCase();
-			if (!ALLOWED_EXTENSIONS.includes(ext)) {
-				return `File type "${ext}" is not supported. Allowed: ${ALLOWED_EXTENSIONS.join(", ")}`;
-			}
-			if (file.size > MAX_FILE_SIZE) {
-				return `File "${file.name}" exceeds the maximum size of ${formatFileSize(MAX_FILE_SIZE)}.`;
-			}
-			if (file.size === 0) {
-				return `File "${file.name}" is empty.`;
-			}
-		}
-		return null;
-	}
+	const files = data?.files ?? [];
+	const totalUploaded = files.length;
+	const totalSize = useMemo(
+		() => files.reduce((sum, file) => sum + file.size_bytes, 0),
+		[files],
+	);
+	const uploadsToday = useMemo(() => {
+		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+		return files.filter((file) => new Date(file.uploaded_at).getTime() >= oneDayAgo).length;
+	}, [files]);
 
 	function handleDrag(e: React.DragEvent) {
 		e.preventDefault();
@@ -118,7 +115,14 @@ export default function WebUploadsPage() {
 			setStatus(error);
 			return;
 		}
-		setSelectedFiles((prev) => [...prev, ...droppedFiles]);
+
+		setSelectedFiles((prev) => {
+			const map = new Map(prev.map((f) => [`${f.name}-${f.size}-${f.lastModified}`, f]));
+			for (const file of droppedFiles) {
+				map.set(`${file.name}-${file.size}-${file.lastModified}`, file);
+			}
+			return Array.from(map.values());
+		});
 		setStatus("");
 	}
 
@@ -129,7 +133,14 @@ export default function WebUploadsPage() {
 			setStatus(error);
 			return;
 		}
-		setSelectedFiles((prev) => [...prev, ...selected]);
+
+		setSelectedFiles((prev) => {
+			const map = new Map(prev.map((f) => [`${f.name}-${f.size}-${f.lastModified}`, f]));
+			for (const file of selected) {
+				map.set(`${file.name}-${file.size}-${file.lastModified}`, file);
+			}
+			return Array.from(map.values());
+		});
 		setStatus("");
 	}
 
@@ -140,61 +151,67 @@ export default function WebUploadsPage() {
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
 
-		if (selectedFiles.length === 0 || !uploadedBy.trim() || !tenant) {
-			setStatus("Provide your name, select a tenant, and choose at least one file.");
+		if (selectedFiles.length === 0 || !uploadedBy.trim()) {
+			setStatus("Provide your name and choose at least one file.");
 			return;
 		}
 
 		setStatus("");
 		setIsUploading(true);
+		let successCount = 0;
+		let failureCount = 0;
 
-		// Simulate upload for each file
-		const newFiles: UploadedFile[] = [];
 		for (const file of selectedFiles) {
-			const newFile: UploadedFile = {
-				id: `up-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-				name: file.name,
-				size: file.size,
-				uploadedBy: uploadedBy.trim(),
-				tenant,
-				status: "uploading",
-				uploadedAt: new Date().toISOString(),
-				validationErrors: 0,
-			};
-			newFiles.push(newFile);
+			const formData = new FormData();
+			formData.append("file", file);
+			formData.append("uploadedBy", uploadedBy.trim());
+
+			const response = await fetch("/api/files", { method: "POST", body: formData });
+			if (response.ok) {
+				successCount += 1;
+			} else {
+				failureCount += 1;
+			}
 		}
 
-		setFiles((prev) => [...newFiles, ...prev]);
-
-		// Simulate upload completion after delay
-		await new Promise((resolve) => setTimeout(resolve, 1500));
-
-		setFiles((prev) =>
-			prev.map((f) =>
-				newFiles.some((nf) => nf.id === f.id)
-					? { ...f, status: "validating" as const }
-					: f,
-			),
-		);
-
-		// Simulate validation completion
-		await new Promise((resolve) => setTimeout(resolve, 1000));
-
-		setFiles((prev) =>
-			prev.map((f) =>
-				newFiles.some((nf) => nf.id === f.id)
-					? { ...f, status: "validated" as const }
-					: f,
-			),
-		);
-
-		setSelectedFiles([]);
+		await queryClient.invalidateQueries({ queryKey: ["uploads"] });
 		setIsUploading(false);
-		setStatus(`Successfully uploaded ${newFiles.length} file(s).`);
+		setSelectedFiles([]);
 
 		if (fileInputRef.current) {
 			fileInputRef.current.value = "";
 		}
+
+		if (failureCount === 0) {
+			setStatus(`Uploaded ${successCount} file(s) successfully.`);
+			return;
+		}
+
+		setStatus(
+			`Uploaded ${successCount} file(s). ${failureCount} file(s) failed. Check file size and format requirements.`,
+		);
+	}
+
+	if (isLoading) {
+		return (
+			<div className="space-y-6">
+				<div>
+					<h1 className="text-2xl font-bold">Web Uploads</h1>
+					<p className="text-muted-foreground">
+						Upload files directly through the web interface with automatic validation
+					</p>
+				</div>
+				<div className="grid gap-4 sm:grid-cols-3">
+					{Array.from({ length: 3 }).map((_, i) => (
+						<Card key={i}>
+							<CardContent className="p-4">
+								<Skeleton className="h-12 w-full" />
+							</CardContent>
+						</Card>
+					))}
+				</div>
+			</div>
+		);
 	}
 
 	return (
@@ -206,7 +223,6 @@ export default function WebUploadsPage() {
 				</p>
 			</div>
 
-			{/* Summary cards */}
 			<div className="grid gap-4 sm:grid-cols-3">
 				<Card>
 					<CardContent className="p-4">
@@ -225,8 +241,8 @@ export default function WebUploadsPage() {
 					<CardContent className="p-4">
 						<div className="flex items-center justify-between">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">Validated</p>
-								<p className="text-2xl font-bold text-green-600 dark:text-green-400">{totalValidated}</p>
+								<p className="text-xs font-medium text-muted-foreground">Uploaded (24h)</p>
+								<p className="text-2xl font-bold text-green-600 dark:text-green-400">{uploadsToday}</p>
 							</div>
 							<div className="rounded-lg bg-green-500/10 p-2.5">
 								<CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
@@ -238,18 +254,17 @@ export default function WebUploadsPage() {
 					<CardContent className="p-4">
 						<div className="flex items-center justify-between">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">Failed</p>
-								<p className="text-2xl font-bold text-destructive">{totalFailed}</p>
+								<p className="text-xs font-medium text-muted-foreground">Storage Used</p>
+								<p className="text-2xl font-bold">{formatFileSize(totalSize)}</p>
 							</div>
-							<div className="rounded-lg bg-destructive/10 p-2.5">
-								<AlertTriangle className="h-5 w-5 text-destructive" />
+							<div className="rounded-lg bg-blue-500/10 p-2.5">
+								<Clock className="h-5 w-5 text-blue-600 dark:text-blue-400" />
 							</div>
 						</div>
 					</CardContent>
 				</Card>
 			</div>
 
-			{/* Upload form */}
 			<Card>
 				<CardHeader>
 					<CardTitle>Upload Files</CardTitle>
@@ -259,30 +274,14 @@ export default function WebUploadsPage() {
 				</CardHeader>
 				<CardContent>
 					<form onSubmit={handleSubmit} className="space-y-4">
-						<div className="grid gap-3 sm:grid-cols-2">
-							<Input
-								aria-label="Uploader name"
-								placeholder="Your name"
-								value={uploadedBy}
-								onChange={(e) => setUploadedBy(e.target.value)}
-								required
-							/>
-							<Select value={tenant} onValueChange={setTenant}>
-								<SelectTrigger>
-									<SelectValue placeholder="Select tenant" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="Acme Corporation">Acme Corporation</SelectItem>
-									<SelectItem value="GlobalTech Industries">GlobalTech Industries</SelectItem>
-									<SelectItem value="Sterling Partners">Sterling Partners</SelectItem>
-									<SelectItem value="Meridian Financial">Meridian Financial</SelectItem>
-									<SelectItem value="Vanguard Analytics">Vanguard Analytics</SelectItem>
-									<SelectItem value="Horizon Capital">Horizon Capital</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
+						<Input
+							aria-label="Uploader name"
+							placeholder="Your name"
+							value={uploadedBy}
+							onChange={(e) => setUploadedBy(e.target.value)}
+							required
+						/>
 
-						{/* Drop zone */}
 						<div
 							className={`relative flex min-h-[160px] cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed transition-colors ${
 								dragActive
@@ -299,9 +298,7 @@ export default function WebUploadsPage() {
 							<p className="text-sm font-medium">
 								{dragActive ? "Drop files here" : "Drag & drop files or click to browse"}
 							</p>
-							<p className="mt-1 text-xs text-muted-foreground">
-								Multiple files supported
-							</p>
+							<p className="mt-1 text-xs text-muted-foreground">Multiple files supported</p>
 							<input
 								ref={fileInputRef}
 								type="file"
@@ -312,23 +309,18 @@ export default function WebUploadsPage() {
 							/>
 						</div>
 
-						{/* Selected files */}
 						{selectedFiles.length > 0 && (
 							<div className="space-y-2">
-								<p className="text-sm font-medium">
-									{selectedFiles.length} file(s) selected
-								</p>
+								<p className="text-sm font-medium">{selectedFiles.length} file(s) selected</p>
 								<div className="flex flex-wrap gap-2">
 									{selectedFiles.map((file, idx) => (
 										<div
-											key={idx}
+											key={`${file.name}-${file.lastModified}-${idx}`}
 											className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5"
 										>
 											<FileText className="h-3.5 w-3.5 text-muted-foreground" />
 											<span className="text-sm">{file.name}</span>
-											<span className="text-xs text-muted-foreground">
-												({formatFileSize(file.size)})
-											</span>
+											<span className="text-xs text-muted-foreground">({formatFileSize(file.size)})</span>
 											<button
 												type="button"
 												onClick={(e) => {
@@ -351,11 +343,7 @@ export default function WebUploadsPage() {
 								{isUploading ? "Uploading..." : `Upload ${selectedFiles.length > 0 ? `(${selectedFiles.length})` : ""}`}
 							</Button>
 							{selectedFiles.length > 0 && (
-								<Button
-									type="button"
-									variant="outline"
-									onClick={() => setSelectedFiles([])}
-								>
+								<Button type="button" variant="outline" onClick={() => setSelectedFiles([])}>
 									<Trash2 className="mr-2 h-4 w-4" />
 									Clear
 								</Button>
@@ -363,7 +351,15 @@ export default function WebUploadsPage() {
 						</div>
 
 						{status && (
-							<p className={`text-sm ${status.includes("Successfully") ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
+							<p
+								className={`text-sm ${
+									status.includes("failed")
+										? "text-destructive"
+										: status.includes("Uploaded")
+											? "text-green-600 dark:text-green-400"
+											: "text-muted-foreground"
+								}`}
+							>
 								{status}
 							</p>
 						)}
@@ -371,7 +367,6 @@ export default function WebUploadsPage() {
 				</CardContent>
 			</Card>
 
-			{/* Upload history */}
 			<Card>
 				<CardHeader>
 					<CardTitle>Upload History</CardTitle>
@@ -381,18 +376,16 @@ export default function WebUploadsPage() {
 						<TableHeader>
 							<TableRow>
 								<TableHead>File</TableHead>
-								<TableHead>Tenant</TableHead>
 								<TableHead>Uploaded By</TableHead>
 								<TableHead>Size</TableHead>
-								<TableHead>Status</TableHead>
-								<TableHead className="hidden md:table-cell">Validation</TableHead>
+								<TableHead>Storage Key</TableHead>
 								<TableHead className="hidden lg:table-cell">Uploaded At</TableHead>
 							</TableRow>
 						</TableHeader>
 						<TableBody>
 							{files.length === 0 ? (
 								<TableRow>
-									<TableCell colSpan={7} className="text-center text-muted-foreground">
+									<TableCell colSpan={5} className="text-center text-muted-foreground">
 										No files uploaded yet.
 									</TableCell>
 								</TableRow>
@@ -402,45 +395,18 @@ export default function WebUploadsPage() {
 										<TableCell className="font-medium">
 											<div className="flex items-center gap-2">
 												<FileText className="h-4 w-4 text-muted-foreground" />
-												{file.name}
+												{file.original_name}
 											</div>
 										</TableCell>
-										<TableCell>{file.tenant}</TableCell>
-										<TableCell>{file.uploadedBy}</TableCell>
-										<TableCell>{formatFileSize(file.size)}</TableCell>
+										<TableCell>{file.uploaded_by}</TableCell>
+										<TableCell>{formatFileSize(file.size_bytes)}</TableCell>
 										<TableCell>
-											<Badge
-												variant={
-													file.status === "validated"
-														? "outline"
-														: file.status === "failed"
-															? "destructive"
-															: "secondary"
-												}
-												className={
-													file.status === "validated"
-														? "border-green-500 text-green-600 dark:text-green-400"
-														: file.status === "uploading" || file.status === "validating"
-															? "animate-pulse"
-															: ""
-												}
-											>
-												{file.status}
+											<Badge variant="outline" className="font-mono">
+												{file.storage_key}
 											</Badge>
 										</TableCell>
-										<TableCell className="hidden md:table-cell">
-											{file.validationErrors > 0 ? (
-												<Badge variant="secondary">
-													{file.validationErrors} error(s)
-												</Badge>
-											) : file.status === "validated" ? (
-												<span className="text-green-600 dark:text-green-400 text-sm">✓ Clean</span>
-											) : (
-												<span className="text-muted-foreground text-sm">—</span>
-											)}
-										</TableCell>
 										<TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-											{new Date(file.uploadedAt).toLocaleString()}
+											{new Date(file.uploaded_at).toLocaleString()}
 										</TableCell>
 									</TableRow>
 								))
@@ -449,6 +415,13 @@ export default function WebUploadsPage() {
 					</Table>
 				</CardContent>
 			</Card>
+
+			{status.includes("failed") && (
+				<div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+					<AlertTriangle className="h-4 w-4" />
+					Some uploads failed validation checks. Retry with supported formats and size limits.
+				</div>
+			)}
 		</div>
 	);
 }

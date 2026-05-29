@@ -213,7 +213,7 @@ export default function ReconciliationPage() {
 							) : (
 								filteredJobs.map((job) => (
 									<Fragment key={job.id}>
-										<TableRow key={job.id}>
+										<TableRow>
 											<TableCell className="font-medium">{job.name}</TableCell>
 											<TableCell>{job.tenantName}</TableCell>
 											<TableCell>

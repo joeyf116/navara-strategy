@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Upload,
@@ -69,6 +69,10 @@ function validateFileSelection(fileList: File[]): string | null {
 	return null;
 }
 
+function getFileFingerprint(file: File): string {
+	return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
 export default function WebUploadsPage() {
 	const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 	const [uploadedBy, setUploadedBy] = useState("");
@@ -85,14 +89,8 @@ export default function WebUploadsPage() {
 
 	const files = data?.files ?? [];
 	const totalUploaded = files.length;
-	const totalSize = useMemo(
-		() => files.reduce((sum, file) => sum + file.size_bytes, 0),
-		[files],
-	);
-	const uploadsToday = useMemo(() => {
-		const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-		return files.filter((file) => new Date(file.uploaded_at).getTime() >= oneDayAgo).length;
-	}, [files]);
+	const totalSize = files.reduce((sum, file) => sum + file.size_bytes, 0);
+	const uniqueUploaders = new Set(files.map((file) => file.uploaded_by)).size;
 
 	function handleDrag(e: React.DragEvent) {
 		e.preventDefault();
@@ -117,9 +115,9 @@ export default function WebUploadsPage() {
 		}
 
 		setSelectedFiles((prev) => {
-			const map = new Map(prev.map((f) => [`${f.name}-${f.size}-${f.lastModified}`, f]));
+			const map = new Map(prev.map((f) => [getFileFingerprint(f), f]));
 			for (const file of droppedFiles) {
-				map.set(`${file.name}-${file.size}-${file.lastModified}`, file);
+				map.set(getFileFingerprint(file), file);
 			}
 			return Array.from(map.values());
 		});
@@ -135,9 +133,9 @@ export default function WebUploadsPage() {
 		}
 
 		setSelectedFiles((prev) => {
-			const map = new Map(prev.map((f) => [`${f.name}-${f.size}-${f.lastModified}`, f]));
+			const map = new Map(prev.map((f) => [getFileFingerprint(f), f]));
 			for (const file of selected) {
-				map.set(`${file.name}-${file.size}-${file.lastModified}`, file);
+				map.set(getFileFingerprint(file), file);
 			}
 			return Array.from(map.values());
 		});
@@ -160,6 +158,7 @@ export default function WebUploadsPage() {
 		setIsUploading(true);
 		let successCount = 0;
 		let failureCount = 0;
+		const uploadErrors: string[] = [];
 
 		for (const file of selectedFiles) {
 			const formData = new FormData();
@@ -171,6 +170,10 @@ export default function WebUploadsPage() {
 				successCount += 1;
 			} else {
 				failureCount += 1;
+				const payload = (await response.json().catch(() => ({}))) as { error?: string };
+				const errorMessage = payload.error ?? `HTTP ${response.status}`;
+				uploadErrors.push(`${file.name}: ${errorMessage}`);
+				console.error("Upload failed", { file: file.name, status: response.status, error: errorMessage });
 			}
 		}
 
@@ -188,7 +191,7 @@ export default function WebUploadsPage() {
 		}
 
 		setStatus(
-			`Uploaded ${successCount} file(s). ${failureCount} file(s) failed. Check file size and format requirements.`,
+			`Uploaded ${successCount} file(s). ${failureCount} file(s) failed: ${uploadErrors.slice(0, 2).join("; ")}${uploadErrors.length > 2 ? "..." : ""}`,
 		);
 	}
 
@@ -241,8 +244,8 @@ export default function WebUploadsPage() {
 					<CardContent className="p-4">
 						<div className="flex items-center justify-between">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">Uploaded (24h)</p>
-								<p className="text-2xl font-bold text-green-600 dark:text-green-400">{uploadsToday}</p>
+								<p className="text-xs font-medium text-muted-foreground">Unique Uploaders</p>
+								<p className="text-2xl font-bold text-green-600 dark:text-green-400">{uniqueUploaders}</p>
 							</div>
 							<div className="rounded-lg bg-green-500/10 p-2.5">
 								<CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
@@ -315,7 +318,7 @@ export default function WebUploadsPage() {
 								<div className="flex flex-wrap gap-2">
 									{selectedFiles.map((file, idx) => (
 										<div
-											key={`${file.name}-${file.lastModified}-${idx}`}
+											key={getFileFingerprint(file)}
 											className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5"
 										>
 											<FileText className="h-3.5 w-3.5 text-muted-foreground" />

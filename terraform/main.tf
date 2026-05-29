@@ -548,6 +548,8 @@ resource "aws_apprunner_service" "this" {
         runtime_environment_variables = {
           NODE_ENV             = "production"
           AUTH_COGNITO_ISSUER  = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
+          FILES_BUCKET         = aws_s3_bucket.transfer.bucket
+          FILES_BUCKET_PREFIX  = var.files_bucket_prefix
         }
 
         runtime_environment_secrets = {

@@ -1,4 +1,4 @@
-export { auth as middleware } from "@/lib/auth";
+export { auth as proxy } from "@/lib/auth";
 
 export const config = {
   // Protect all routes except login, api/auth, static assets, and Next.js internals

@@ -18,19 +18,25 @@ export async function GET() {
   const history = getAnomalyHistory();
 
   const allAnomalies = [...metricAnomalies, ...ingestionAnomalies, ...queueAnomalies, ...history];
+  const severityRank = { critical: 0, warning: 1, info: 2 };
+  const sortedAnomalies = [...allAnomalies].sort((a, b) => {
+    const severityDelta = severityRank[a.severity] - severityRank[b.severity];
+    if (severityDelta !== 0) return severityDelta;
+    return new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime();
+  });
 
-  const activeCount = allAnomalies.filter((a) => a.status === "active").length;
-  const criticalCount = allAnomalies.filter((a) => a.severity === "critical").length;
-  const warningCount = allAnomalies.filter((a) => a.severity === "warning").length;
+  const activeCount = sortedAnomalies.filter((a) => a.status === "active").length;
+  const criticalCount = sortedAnomalies.filter((a) => a.severity === "critical").length;
+  const warningCount = sortedAnomalies.filter((a) => a.severity === "warning").length;
 
   return NextResponse.json({
-    anomalies: allAnomalies,
+    anomalies: sortedAnomalies,
     summary: {
-      total: allAnomalies.length,
+      total: sortedAnomalies.length,
       active: activeCount,
       critical: criticalCount,
       warnings: warningCount,
-      resolved: allAnomalies.filter((a) => a.status === "resolved").length,
+      resolved: sortedAnomalies.filter((a) => a.status === "resolved").length,
     },
   });
 }

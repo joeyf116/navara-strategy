@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
 	CheckCircle,
 	XCircle,
@@ -152,20 +152,25 @@ export default function ReconciliationPage() {
 					<CardContent className="p-4">
 						<div className="flex items-center justify-between">
 							<div className="space-y-1">
-								<p className="text-xs font-medium text-muted-foreground">Jobs Running</p>
-								<p className="text-2xl font-bold">{summary.runningJobs}</p>
-								<p className="text-xs text-muted-foreground">
-									{summary.failedJobs > 0 && (
-										<span className="text-destructive">{summary.failedJobs} failed</span>
-									)}
-								</p>
+								<p className="text-xs font-medium text-muted-foreground">Discrepancy Rate</p>
+								<p className="text-2xl font-bold">{summary.discrepancyRate}%</p>
 							</div>
-							<div className="rounded-lg bg-blue-500/10 p-2.5">
-								<RefreshCw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+							<div className="rounded-lg bg-yellow-500/10 p-2.5">
+								<AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
 							</div>
 						</div>
 					</CardContent>
 				</Card>
+			</div>
+
+			<div className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-card px-4 py-3 text-sm">
+				<div className="flex items-center gap-1.5 text-muted-foreground">
+					<RefreshCw className="h-4 w-4" />
+					Running jobs: <span className="font-medium text-foreground">{summary.runningJobs}</span>
+				</div>
+				<div className="text-muted-foreground">
+					Failed jobs: <span className="font-medium text-destructive">{summary.failedJobs}</span>
+				</div>
 			</div>
 
 			{/* Reconciliation jobs */}
@@ -207,8 +212,8 @@ export default function ReconciliationPage() {
 								</TableRow>
 							) : (
 								filteredJobs.map((job) => (
-									<>
-										<TableRow key={job.id}>
+									<Fragment key={job.id}>
+										<TableRow>
 											<TableCell className="font-medium">{job.name}</TableCell>
 											<TableCell>{job.tenantName}</TableCell>
 											<TableCell>
@@ -339,7 +344,7 @@ export default function ReconciliationPage() {
 												</TableCell>
 											</TableRow>
 										)}
-									</>
+									</Fragment>
 								))
 							)}
 						</TableBody>

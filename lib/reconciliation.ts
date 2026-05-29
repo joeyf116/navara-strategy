@@ -37,6 +37,7 @@ export type ReconciliationSummary = {
   runningJobs: number;
   failedJobs: number;
   overallMatchRate: number;
+  discrepancyRate: number;
   totalRecordsReconciled: number;
   totalDiscrepancies: number;
   recentJobs: ReconciliationJob[];
@@ -186,6 +187,7 @@ export function getReconciliationSummary(): ReconciliationSummary {
     runningJobs: runningJobs.length,
     failedJobs: failedJobs.length,
     overallMatchRate: totalRecords > 0 ? Math.round((totalMatched / totalRecords) * 10000) / 100 : 0,
+    discrepancyRate: totalRecords > 0 ? Math.round((totalDiscrepancies / totalRecords) * 10000) / 100 : 0,
     totalRecordsReconciled: totalRecords,
     totalDiscrepancies,
     recentJobs: jobs,

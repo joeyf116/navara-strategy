@@ -4,11 +4,21 @@ Next.js Operational Insights & Platform Health Portal with SFTP file-share hub, 
 
 ## What this includes
 
+### Existing Features
+
+- AI-based anomaly detection dashboard with severity-based triage (`/anomalies`)
+- Intelligent ingestion validation with rule inventory and result drill-down (`/validation`)
+- Automated reconciliation tracking with discrepancy visibility (`/reconciliation`)
+- Role-aware file portal with drag/drop upload and secure download (`/uploads`, `GET|POST /api/files`, `GET /api/files/:id/download`)
+- SFTP file-share upload hub (`/upload`)
+- Operational insights portal with tenant, ingestion, queue, failed-processing, audit, health, database, and settings surfaces
+
 ### SFTP File Share Hub (`/upload`)
 
 - Client upload hub with shadcn-style `Card`, `Input`, `Button`, and `Table` components.
-- Upload API (`POST /api/files`) and list API (`GET /api/files`).
+- Authenticated upload/list/download APIs (`POST /api/files`, `GET /api/files`, `GET /api/files/:id/download`).
 - PostgreSQL support via `DATABASE_URL` (RDS-ready). Falls back to local file metadata when no DB is configured.
+- Uses S3 object storage in deployed environments via `FILES_BUCKET` and `FILES_BUCKET_PREFIX` injected from Terraform.
 
 ### Operational Insights Portal (`/`)
 
@@ -362,11 +372,9 @@ The deploy workflow uses **GitHub OIDC** — no long-lived AWS access keys are s
 
 The platform is architected to support:
 
-- AI-based anomaly detection
-- Intelligent ingestion validation
-- Automated reconciliation
-- Web-based uploads
 - Analytics warehouse exports
 - Real-time event streaming (SSE/WebSocket)
 - MCP integrations
 - RAG/document indexing
+- Predictive capacity and queue forecasting
+- Auto-remediation playbooks for common ingestion failures

@@ -109,7 +109,7 @@ queryKey: ["uploads"],
 queryFn: () => fetch("/api/files").then((r) => r.json()),
 });
 
-const files = data?.files ?? [];
+const files = useMemo(() => data?.files ?? [], [data?.files]);
 const myUploads = useMemo(
 () => files.filter((file) => file.uploaded_by_email.toLowerCase() === userEmail),
 [files, userEmail],
@@ -459,11 +459,15 @@ files.map((file) => (
 {new Date(file.uploaded_at).toLocaleString()}
 </TableCell>
 <TableCell>
-<Button asChild variant="outline" size="sm">
-<a href={`/api/files/${encodeURIComponent(file.id)}/download`}>
-<Download className="h-3.5 w-3.5" />
-</a>
-</Button>
+<Button
+										variant="outline"
+										size="sm"
+										onClick={() => {
+											window.location.href = `/api/files/${encodeURIComponent(file.id)}/download`;
+										}}
+									>
+										<Download className="h-3.5 w-3.5" />
+									</Button>
 </TableCell>
 </TableRow>
 ))

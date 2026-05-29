@@ -33,7 +33,7 @@ export async function GET(
     const content = await downloadSharedFileContent(file);
     const safeFileName = buildDownloadFilename(file.original_name);
 
-    return new NextResponse(content, {
+    return new NextResponse(new Uint8Array(content), {
       status: 200,
       headers: {
         "Content-Type": "application/octet-stream",

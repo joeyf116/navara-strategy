@@ -238,6 +238,7 @@ try {
 } finally {
 	setIsUploading(false);
 }
+}
 
 if (isLoading) {
 return (

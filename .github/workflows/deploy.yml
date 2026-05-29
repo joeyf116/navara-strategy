@@ -19,6 +19,9 @@ env:
   TERRAFORM_VERSION: "1.8.5"
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }} # e.g. navara-sftp
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+  TF_LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
   APPRUNNER_SERVICE_ARN: ${{ vars.APPRUNNER_SERVICE_ARN }}
 
 permissions:
@@ -60,12 +63,53 @@ jobs:
           NEXTAUTH_URL: http://localhost:3000
 
   # ---------------------------------------------------------------------------
-  # 2. Build & push Docker image to ECR
+  # 2. Terraform bootstrap – ensure ECR exists before docker push on first run
+  # ---------------------------------------------------------------------------
+  terraform-bootstrap:
+    name: Terraform Bootstrap
+    runs-on: ubuntu-latest
+    needs: ci
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ env.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ env.TF_STATE_KEY }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.TF_LOCK_TABLE }}"
+
+      - name: Terraform Bootstrap ECR
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=aws_ecr_repository.app \
+            -target=aws_ecr_lifecycle_policy.app \
+            -var="app_image_identifier=public.ecr.aws/docker/library/node:20-alpine" \
+            -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}"
+
+  # ---------------------------------------------------------------------------
+  # 3. Build & push Docker image to ECR
   # ---------------------------------------------------------------------------
   build-push:
     name: Build & Push Image
     runs-on: ubuntu-latest
-    needs: ci
+    needs: terraform-bootstrap
     outputs:
       image_uri: ${{ steps.image.outputs.uri }}
 
@@ -106,13 +150,15 @@ jobs:
           docker push "${{ env.latest }}"
 
   # ---------------------------------------------------------------------------
-  # 3. Terraform – provision / update infrastructure
+  # 4. Terraform – provision / update infrastructure
   # ---------------------------------------------------------------------------
   terraform:
     name: Terraform Apply
     runs-on: ubuntu-latest
     needs: build-push
     if: ${{ !inputs.skip_terraform }}
+    outputs:
+      apprunner_service_arn: ${{ steps.outputs.apprunner_service_arn }}
     defaults:
       run:
         working-directory: terraform
@@ -132,7 +178,12 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ env.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ env.TF_STATE_KEY }}" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ env.TF_LOCK_TABLE }}"
 
       - name: Terraform Validate
         run: terraform validate
@@ -140,19 +191,30 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
+          set +e
           terraform plan \
             -var="app_image_identifier=${{ needs.build-push.outputs.image_uri }}" \
             -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}" \
             -out=tfplan \
             -detailed-exitcode
-        continue-on-error: true # exit 2 means changes present – not an error
+          EXIT_CODE=$?
+          echo "exitcode=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          if [ "$EXIT_CODE" -eq 1 ]; then
+            exit 1
+          fi
 
       - name: Terraform Apply
-        if: steps.plan.outputs.exitcode != '1'
-        run: terraform apply -auto-approve tfplan
+        if: steps.plan.outputs.exitcode == '2'
+        run: terraform apply -auto-approve -input=false tfplan
+
+      - name: Capture Terraform Outputs
+        id: outputs
+        run: |
+          SERVICE_ARN=$(terraform output -raw apprunner_service_arn)
+          echo "apprunner_service_arn=${SERVICE_ARN}" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
-  # 4. Deploy – trigger App Runner to pull the new image
+  # 5. Deploy – trigger App Runner to pull the new image
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy App Runner
@@ -167,17 +229,34 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Resolve App Runner service ARN
+        id: service
+        run: |
+          if [ "${{ needs.terraform.result }}" = "success" ] && [ -n "${{ needs.terraform.outputs.apprunner_service_arn }}" ]; then
+            SERVICE_ARN="${{ needs.terraform.outputs.apprunner_service_arn }}"
+          else
+            SERVICE_ARN="${{ env.APPRUNNER_SERVICE_ARN }}"
+          fi
+
+          if [ -z "${SERVICE_ARN}" ]; then
+            echo "Unable to resolve App Runner service ARN."
+            echo "Set vars.APPRUNNER_SERVICE_ARN when running with skip_terraform=true."
+            exit 1
+          fi
+
+          echo "service_arn=${SERVICE_ARN}" >> "$GITHUB_OUTPUT"
+
       - name: Trigger App Runner deployment
         run: |
           aws apprunner start-deployment \
-            --service-arn "${{ env.APPRUNNER_SERVICE_ARN }}"
+            --service-arn "${{ steps.service.outputs.service_arn }}"
 
       - name: Wait for deployment to complete
         run: |
           echo "Waiting for App Runner service to reach RUNNING state..."
           for i in $(seq 1 30); do
             STATUS=$(aws apprunner describe-service \
-              --service-arn "${{ env.APPRUNNER_SERVICE_ARN }}" \
+              --service-arn "${{ steps.service.outputs.service_arn }}" \
               --query "Service.Status" \
               --output text)
             echo "  attempt $i/30 – status: $STATUS"

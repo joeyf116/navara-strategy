@@ -12,21 +12,7 @@ terraform {
     }
   }
 
-  # Uncomment and configure to enable remote state management.
-  # The S3 bucket and DynamoDB table can be bootstrapped with:
-  #   aws s3api create-bucket --bucket <your-tf-state-bucket> --region us-east-1
-  #   aws dynamodb create-table --table-name <your-tf-lock-table> \
-  #     --attribute-definitions AttributeName=LockID,AttributeType=S \
-  #     --key-schema AttributeName=LockID,KeyType=HASH \
-  #     --billing-mode PAY_PER_REQUEST
-  #
-  # backend "s3" {
-  #   bucket         = "<project-name>-terraform-state"
-  #   key            = "<project-name>/terraform.tfstate"
-  #   region         = "us-east-1"
-  #   dynamodb_table = "<project-name>-terraform-locks"
-  #   encrypt        = true
-  # }
+  backend "s3" {}
 }
 
 provider "aws" {

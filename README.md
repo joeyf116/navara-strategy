@@ -9,15 +9,16 @@ Next.js Operational Insights & Platform Health Portal with SFTP file-share hub, 
 - AI-based anomaly detection dashboard with severity-based triage (`/anomalies`)
 - Intelligent ingestion validation with rule inventory and result drill-down (`/validation`)
 - Automated reconciliation tracking with discrepancy visibility (`/reconciliation`)
-- Web-based uploads with drag/drop UI and API-backed file persistence (`/uploads`, `POST /api/files`)
+- Role-aware file portal with drag/drop upload and secure download (`/uploads`, `GET|POST /api/files`, `GET /api/files/:id/download`)
 - SFTP file-share upload hub (`/upload`)
 - Operational insights portal with tenant, ingestion, queue, failed-processing, audit, health, database, and settings surfaces
 
 ### SFTP File Share Hub (`/upload`)
 
 - Client upload hub with shadcn-style `Card`, `Input`, `Button`, and `Table` components.
-- Upload API (`POST /api/files`) and list API (`GET /api/files`).
+- Authenticated upload/list/download APIs (`POST /api/files`, `GET /api/files`, `GET /api/files/:id/download`).
 - PostgreSQL support via `DATABASE_URL` (RDS-ready). Falls back to local file metadata when no DB is configured.
+- Uses S3 object storage in deployed environments via `FILES_BUCKET` and `FILES_BUCKET_PREFIX` injected from Terraform.
 
 ### Operational Insights Portal (`/`)
 

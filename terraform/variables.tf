@@ -70,6 +70,14 @@ variable "ecr_max_image_count" {
   default     = 30
 }
 
+# ---------- File Portal ----------
+
+variable "files_bucket_prefix" {
+  description = "S3 key prefix used by the file portal for uploaded and shared files"
+  type        = string
+  default     = "portal-files"
+}
+
 # ---------- App Runner ----------
 
 variable "app_image_identifier" {

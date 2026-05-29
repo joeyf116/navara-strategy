@@ -38,7 +38,7 @@ const navigation = [
 	{ name: "Dashboard", href: "/", icon: LayoutDashboard },
 	{ name: "Tenants", href: "/tenants", icon: Users },
 	{ name: "File Explorer", href: "/files", icon: FolderOpen },
-	{ name: "Web Uploads", href: "/uploads", icon: Upload },
+	{ name: "File Portal", href: "/uploads", icon: Upload },
 	{ name: "Ingestion Jobs", href: "/ingestion", icon: Activity },
 	{ name: "Validation", href: "/validation", icon: FileCheck },
 	{ name: "Anomaly Detection", href: "/anomalies", icon: ShieldAlert },

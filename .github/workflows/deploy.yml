@@ -239,7 +239,7 @@ jobs:
           fi
 
           if [ -z "${SERVICE_ARN}" ]; then
-            echo "Unable to resolve APPRUNNER service ARN."
+            echo "Unable to resolve App Runner service ARN."
             echo "Set vars.APPRUNNER_SERVICE_ARN when running with skip_terraform=true."
             exit 1
           fi

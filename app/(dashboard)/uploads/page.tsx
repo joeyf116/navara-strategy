@@ -47,7 +47,7 @@ files: SharedFile[];
 };
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls", ".json", ".xml", ".pdf", ".txt", ".dat"];
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
 
 function formatFileSize(bytes: number): string {
 if (bytes < 1024) return `${bytes} B`;
@@ -196,40 +196,47 @@ let successCount = 0;
 let failureCount = 0;
 const uploadErrors: string[] = [];
 
-for (const file of selectedFiles) {
-const formData = new FormData();
-formData.append("file", file);
-if (isManager && targetUserEmail.trim()) {
-formData.append("targetUserEmail", targetUserEmail.trim().toLowerCase());
-}
+try {
+	for (const file of selectedFiles) {
+		const formData = new FormData();
+		formData.append("file", file);
+		if (isManager && targetUserEmail.trim()) {
+			formData.append("targetUserEmail", targetUserEmail.trim().toLowerCase());
+		}
 
-const response = await fetch("/api/files", { method: "POST", body: formData });
-if (response.ok) {
-successCount += 1;
-} else {
-failureCount += 1;
-const payload = (await response.json().catch(() => ({}))) as { error?: string };
-const errorMessage = payload.error ?? `HTTP ${response.status}`;
-uploadErrors.push(`${file.name}: ${errorMessage}`);
-}
-}
+		try {
+			const response = await fetch("/api/files", { method: "POST", body: formData });
+			if (response.ok) {
+				successCount += 1;
+			} else {
+				failureCount += 1;
+				const payload = (await response.json().catch(() => ({}))) as { error?: string };
+				const errorMessage = payload.error ?? `HTTP ${response.status}`;
+				uploadErrors.push(`${file.name}: ${errorMessage}`);
+			}
+		} catch {
+			failureCount += 1;
+			uploadErrors.push(`${file.name}: Network error while uploading.`);
+		}
+	}
 
-await queryClient.invalidateQueries({ queryKey: ["uploads"] });
-setIsUploading(false);
-setSelectedFiles([]);
+	await queryClient.invalidateQueries({ queryKey: ["uploads"] });
+	setSelectedFiles([]);
 
-if (fileInputRef.current) {
-fileInputRef.current.value = "";
-}
+	if (fileInputRef.current) {
+		fileInputRef.current.value = "";
+	}
 
-if (failureCount === 0) {
-setStatus(`Uploaded ${successCount} file(s) successfully.`);
-return;
-}
+	if (failureCount === 0) {
+		setStatus(`Uploaded ${successCount} file(s) successfully.`);
+		return;
+	}
 
-setStatus(
-`Uploaded ${successCount} file(s). ${failureCount} file(s) failed: ${uploadErrors.slice(0, 2).join("; ")}${uploadErrors.length > 2 ? "..." : ""}`,
-);
+	setStatus(
+		`Uploaded ${successCount} file(s). ${failureCount} file(s) failed: ${uploadErrors.slice(0, 2).join("; ")}${uploadErrors.length > 2 ? "..." : ""}`,
+	);
+} finally {
+	setIsUploading(false);
 }
 
 if (isLoading) {
@@ -462,9 +469,10 @@ files.map((file) => (
 <Button
 										variant="outline"
 										size="sm"
-										onClick={() => {
-											window.location.href = `/api/files/${encodeURIComponent(file.id)}/download`;
-										}}
+	aria-label={`Download ${file.original_name}`}
+	onClick={() => {
+		window.location.href = `/api/files/${encodeURIComponent(file.id)}/download`;
+	}}
 									>
 										<Download className="h-3.5 w-3.5" />
 									</Button>

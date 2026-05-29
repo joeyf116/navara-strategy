@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const file = formData.get("file");
     const targetUserEmailRaw = formData.get("targetUserEmail");
+    const uploadedByRaw = formData.get("uploadedBy");
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing required file." }, { status: 400 });
@@ -49,6 +50,10 @@ export async function POST(request: Request) {
 
     const viewerEmail = user.email.trim().toLowerCase();
     const canManage = canManageFiles(user.role);
+    const uploadedBy =
+      typeof uploadedByRaw === "string" && uploadedByRaw.trim().length > 0
+        ? uploadedByRaw.trim()
+        : user.name?.trim() || viewerEmail;
     const targetUserEmail =
       typeof targetUserEmailRaw === "string" && targetUserEmailRaw.trim().length > 0
         ? targetUserEmailRaw.trim().toLowerCase()
@@ -78,7 +83,7 @@ export async function POST(request: Request) {
 
     const created = await createSharedFile({
       file,
-      uploadedBy: user.name?.trim() || viewerEmail,
+      uploadedBy,
       uploadedByEmail: viewerEmail,
       ownerEmail: targetUserEmail,
       source: targetUserEmail === viewerEmail ? "user_upload" : "admin_share",

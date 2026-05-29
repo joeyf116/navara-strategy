@@ -32,7 +32,11 @@ const filesBucketPrefix = (process.env.FILES_BUCKET_PREFIX?.trim() || "portal-fi
 
 const s3Client = filesBucket ? new S3Client({}) : null;
 
-function normalizeEmail(email: string) {
+function normalizeEmail(email: string | null | undefined) {
+  if (typeof email !== "string") {
+    return "";
+  }
+
   return email.trim().toLowerCase();
 }
 
@@ -84,10 +88,43 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE shared_files ALTER COLUMN source SET NOT NULL`);
 }
 
+function normalizeLocalRecord(record: Partial<SharedFile>): SharedFile | null {
+  if (!record.id || !record.storage_key || !record.original_name) {
+    return null;
+  }
+
+  const uploadedBy = record.uploaded_by?.trim() || "Unknown uploader";
+  const uploadedByEmail = normalizeEmail(record.uploaded_by_email);
+  const ownerEmail = normalizeEmail(record.owner_email);
+  const fallbackEmail = uploadedBy.includes("@") ? normalizeEmail(uploadedBy) : "";
+
+  return {
+    id: record.id,
+    original_name: record.original_name,
+    storage_key: record.storage_key,
+    size_bytes: typeof record.size_bytes === "number" ? record.size_bytes : 0,
+    uploaded_by: uploadedBy,
+    uploaded_by_email: uploadedByEmail || fallbackEmail || "unknown@local.invalid",
+    owner_email: ownerEmail || uploadedByEmail || fallbackEmail || "unknown@local.invalid",
+    source:
+      record.source === "admin_share" || record.source === "system_generated"
+        ? record.source
+        : "user_upload",
+    uploaded_at: record.uploaded_at || new Date(0).toISOString(),
+  };
+}
+
 async function readLocalMetadata() {
   try {
     const data = await readFile(metadataFilePath, "utf-8");
-    return JSON.parse(data) as SharedFile[];
+    const parsed = JSON.parse(data) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((record) => normalizeLocalRecord(record as Partial<SharedFile>))
+      .filter((record): record is SharedFile => record !== null);
   } catch {
     return [];
   }

@@ -3,16 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import {
-	Upload,
-	Moon,
-	Sun,
-	LogOut,
-	Menu,
-	X,
-	FolderTree,
-	Settings,
-} from "lucide-react";
+import { Moon, Sun, LogOut, Menu, X, FolderTree, Settings } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -25,7 +16,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 const navigation = [
 	{ name: "Files", href: "/files", icon: FolderTree },
-	{ name: "Uploads", href: "/uploads", icon: Upload },
 	{ name: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -66,7 +56,7 @@ export function DashboardSidebar() {
 	const sidebarContent = (
 		<>
 			<div className="flex h-14 items-center px-4">
-				<Link href="/uploads" className="flex items-center gap-2">
+				<Link href="/files" className="flex items-center gap-2">
 					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
 						<span className="text-sm font-bold text-primary-foreground">N</span>
 					</div>

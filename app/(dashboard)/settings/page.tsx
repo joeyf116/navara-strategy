@@ -123,11 +123,6 @@ export default function SettingsPage() {
 	// The UNC path Windows File Explorer accepts as an alternative
 	const windowsUncPath = `\\\\${webDavHost}@SSL\\DavWWWRoot\\api\\dav`;
 
-	// Terminal quick-connect command
-	const sftpCommand = conn.sftpEndpoint
-		? `sftp -P 22 <your-username>@${conn.sftpEndpoint}`
-		: "";
-
 	async function loadPasswords() {
 		await queryClient.invalidateQueries({ queryKey: ["app-passwords"] });
 	}
@@ -200,8 +195,8 @@ export default function SettingsPage() {
 							<CardTitle>AWS Transfer Family — SFTP</CardTitle>
 							<CardDescription>
 								Connect any SFTP client (Cyberduck, FileZilla, WinSCP, or the
-								terminal) using the values below. Authentication uses your SSH
-								private key.
+								terminal) using the values below. Sign in with your portal email
+								and password — no SSH key required.
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="space-y-4">
@@ -210,22 +205,22 @@ export default function SettingsPage() {
 								<CopyField label="Port" value="22" placeholder="22" />
 								<CopyField
 									label="Username"
-									value=""
-									placeholder="Assigned by your administrator"
+									value={conn.userEmail}
+									placeholder="your account email"
 								/>
 								<CopyField
-									label="Authentication"
-									value="SSH Key (private key)"
-									placeholder="SSH Key"
+									label="Password"
+									value="Your portal password"
+									placeholder="Your portal password"
 								/>
 							</div>
 
-							{sftpCommand ? (
+							{conn.sftpEndpoint && conn.userEmail ? (
 								<>
 									<Separator />
 									<CopyField
 										label="Terminal quick-connect"
-										value={sftpCommand}
+										value={`sftp -P 22 ${conn.userEmail}@${conn.sftpEndpoint}`}
 									/>
 								</>
 							) : null}
@@ -242,8 +237,9 @@ export default function SettingsPage() {
 									Cyberduck / Mountain Duck
 								</p>
 								<p>
-									New Bookmark → <strong>SFTP</strong> → paste Host and Username
-									→ set SSH Key under &ldquo;SSH Private Key&rdquo;.
+									New Bookmark → <strong>SFTP</strong> → paste Host and Port →
+									enter your email as the username → Logon Type:{" "}
+									<strong>Normal</strong> → enter your portal password.
 								</p>
 							</div>
 							<Separator />
@@ -251,8 +247,9 @@ export default function SettingsPage() {
 								<p className="font-medium text-foreground">FileZilla</p>
 								<p>
 									File → Site Manager → New Site → Protocol:{" "}
-									<strong>SFTP</strong> → paste Host, Port 22, Username → set
-									Key file under Logon Type: Key file.
+									<strong>SFTP</strong> → paste Host, Port 22 → Logon Type:{" "}
+									<strong>Normal</strong> → enter your email and portal
+									password.
 								</p>
 							</div>
 							<Separator />
@@ -260,8 +257,8 @@ export default function SettingsPage() {
 								<p className="font-medium text-foreground">WinSCP</p>
 								<p>
 									New Session → File Protocol: <strong>SFTP</strong> → paste
-									Host name, Port 22, User name → Advanced → SSH →
-									Authentication → select your private key file.
+									Host name, Port 22 → enter your email and portal password →
+									Login.
 								</p>
 							</div>
 						</CardContent>

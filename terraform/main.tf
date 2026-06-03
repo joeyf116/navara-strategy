@@ -651,6 +651,7 @@ resource "aws_iam_role_policy" "sftp_auth_lambda" {
         Effect = "Allow"
         Action = [
           "cognito-idp:AdminInitiateAuth",
+          "cognito-idp:ListUsers",
           "cognito-idp:AdminGetUser",
           "cognito-idp:AdminListGroupsForUser",
         ]
@@ -858,6 +859,16 @@ resource "aws_iam_role_policy" "lambda_app" {
           aws_s3_bucket.transfer.arn,
           "${aws_s3_bucket.transfer.arn}/*"
         ]
+      },
+      {
+        Sid    = "CognitoUserLookup"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:ListUsers",
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminListGroupsForUser"
+        ]
+        Resource = aws_cognito_user_pool.this.arn
       }
     ]
   })

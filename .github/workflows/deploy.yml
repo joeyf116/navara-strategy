@@ -183,6 +183,34 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
+      - name: Reconcile pre-existing migration resources
+        run: |
+          ROLE_NAME="${{ env.ECR_REPOSITORY }}-codebuild-migrate"
+          ROLE_POLICY_NAME="${ROLE_NAME}-policy"
+          PROJECT_NAME="${{ env.DB_MIGRATION_PROJECT_NAME }}"
+
+          # Import role if it exists in AWS but is missing from Terraform state.
+          if ! terraform state list | grep -qx 'aws_iam_role.codebuild_migrate'; then
+            if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+              terraform import -input=false aws_iam_role.codebuild_migrate "$ROLE_NAME"
+            fi
+          fi
+
+          # Import inline role policy if it exists in AWS but is missing from state.
+          if ! terraform state list | grep -qx 'aws_iam_role_policy.codebuild_migrate'; then
+            if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$ROLE_POLICY_NAME" >/dev/null 2>&1; then
+              terraform import -input=false aws_iam_role_policy.codebuild_migrate "${ROLE_NAME}:${ROLE_POLICY_NAME}"
+            fi
+          fi
+
+          # Import CodeBuild project if it exists in AWS but is missing from state.
+          if ! terraform state list | grep -qx 'aws_codebuild_project.db_migrate'; then
+            PROJECT_EXISTS=$(aws codebuild batch-get-projects --names "$PROJECT_NAME" --query 'length(projects)' --output text)
+            if [ "$PROJECT_EXISTS" = "1" ]; then
+              terraform import -input=false aws_codebuild_project.db_migrate "$PROJECT_NAME"
+            fi
+          fi
+
       - name: Terraform Plan
         id: plan
         run: |

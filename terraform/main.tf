@@ -60,6 +60,12 @@ resource "aws_security_group" "app" {
 resource "aws_cognito_user_pool" "this" {
   name = "${var.project_name}-users"
 
+  # Cognito does not allow modifying/removing schema attributes after creation.
+  # We manage custom attributes via CLI/API, then ignore drift here.
+  lifecycle {
+    ignore_changes = [schema]
+  }
+
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
 

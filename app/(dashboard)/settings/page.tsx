@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -14,7 +15,23 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ConnectionInfo = {
@@ -31,6 +48,15 @@ type CompanyAccessResponse = {
 		isSuperAdmin: boolean;
 		grants: Array<{ companyId: string; canWrite: boolean }>;
 	};
+};
+
+type CognitoUsersResponse = {
+	users: Array<{
+		username: string;
+		email: string;
+		enabled: boolean;
+		status: string;
+	}>;
 };
 
 function CopyField({
@@ -85,8 +111,15 @@ function CopyField({
 export default function SettingsPage() {
 	const queryClient = useQueryClient();
 	const [newCompanyId, setNewCompanyId] = useState("");
-	const [targetUserEmail, setTargetUserEmail] = useState("");
-	const [targetCompanies, setTargetCompanies] = useState("");
+	const [selectedCompanyId, setSelectedCompanyId] = useState("");
+	const [userSearch, setUserSearch] = useState("");
+	const [selectedUserEmail, setSelectedUserEmail] = useState("");
+	const [selectedUserHasAccess, setSelectedUserHasAccess] = useState(false);
+	const [selectedUserCanWrite, setSelectedUserCanWrite] = useState(true);
+	const [selectedUserBaseGrants, setSelectedUserBaseGrants] = useState<
+		Array<{ companyId: string; canWrite: boolean }>
+	>([]);
+	const [loadingUserAccess, setLoadingUserAccess] = useState(false);
 	const [adminStatus, setAdminStatus] = useState<string | null>(null);
 	const [adminError, setAdminError] = useState<string | null>(null);
 	const [adminWorking, setAdminWorking] = useState(false);
@@ -117,6 +150,45 @@ export default function SettingsPage() {
 		},
 	});
 
+	const { data: cognitoUsersResponse } = useQuery<CognitoUsersResponse>({
+		queryKey: ["company-access-users"],
+		enabled: conn.isSuperAdmin,
+		queryFn: async () => {
+			const response = await fetch("/api/settings/company-access/users");
+			if (!response.ok) throw new Error("Failed to load Cognito users.");
+			return response.json() as Promise<CognitoUsersResponse>;
+		},
+	});
+
+	const allCompanies = companyAccess?.allCompanies ?? [];
+	const activeCompanyId = selectedCompanyId || allCompanies[0] || "";
+
+	function syncCompanyPermissionDraft(
+		companyId: string,
+		grants: Array<{ companyId: string; canWrite: boolean }>,
+	) {
+		const grant = grants.find((item) => item.companyId === companyId);
+		setSelectedUserHasAccess(Boolean(grant));
+		setSelectedUserCanWrite(grant?.canWrite !== false);
+	}
+
+	function onCompanyChange(nextCompanyId: string) {
+		setSelectedCompanyId(nextCompanyId);
+		syncCompanyPermissionDraft(nextCompanyId, selectedUserBaseGrants);
+	}
+
+	const filteredUsers = useMemo(() => {
+		const cognitoUsers = cognitoUsersResponse?.users ?? [];
+		const normalized = userSearch.trim().toLowerCase();
+		if (!normalized) return cognitoUsers;
+		return cognitoUsers.filter((user) => {
+			return (
+				user.email.toLowerCase().includes(normalized) ||
+				user.username.toLowerCase().includes(normalized)
+			);
+		});
+	}, [cognitoUsersResponse?.users, userSearch]);
+
 	async function createCompanyAction() {
 		const companyId = newCompanyId.trim();
 		if (!companyId) return;
@@ -141,20 +213,54 @@ export default function SettingsPage() {
 		}
 
 		setNewCompanyId("");
-		setAdminStatus(`Created company ${payload.companyId ?? companyId}.`);
+		const createdCompany = payload.companyId ?? companyId;
+		setSelectedCompanyId(createdCompany);
+		syncCompanyPermissionDraft(createdCompany, selectedUserBaseGrants);
+		setAdminStatus(`Created company ${createdCompany}.`);
 		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
 		await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
 	}
 
-	async function saveUserAccessAction() {
-		const userEmail = targetUserEmail.trim().toLowerCase();
-		if (!userEmail) return;
+	async function loadUserAccessAction(userEmail: string) {
+		if (!userEmail.trim()) return;
 
-		const grants = targetCompanies
-			.split(",")
-			.map((companyId) => companyId.trim())
-			.filter(Boolean)
-			.map((companyId) => ({ companyId, canWrite: true }));
+		setAdminStatus(null);
+		setAdminError(null);
+		setSelectedUserEmail(userEmail);
+		setLoadingUserAccess(true);
+		const response = await fetch(
+			`/api/settings/company-access?userEmail=${encodeURIComponent(userEmail)}`,
+		);
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+			targetUser?: {
+				grants?: Array<{ companyId: string; canWrite: boolean }>;
+			};
+		};
+		setLoadingUserAccess(false);
+
+		if (!response.ok) {
+			setAdminError(payload.error ?? "Failed to load user access.");
+			setSelectedUserBaseGrants([]);
+			return;
+		}
+
+		const nextGrants = payload.targetUser?.grants ?? [];
+		setSelectedUserBaseGrants(nextGrants);
+		syncCompanyPermissionDraft(activeCompanyId, nextGrants);
+	}
+
+	async function saveUserAccessAction() {
+		const userEmail = selectedUserEmail.trim().toLowerCase();
+		const companyId = activeCompanyId.trim();
+		if (!userEmail || !companyId) return;
+
+		const grants = selectedUserBaseGrants.filter(
+			(grant) => grant.companyId !== companyId,
+		);
+		if (selectedUserHasAccess) {
+			grants.push({ companyId, canWrite: selectedUserCanWrite });
+		}
 
 		setAdminStatus(null);
 		setAdminError(null);
@@ -170,6 +276,7 @@ export default function SettingsPage() {
 		});
 		const payload = (await response.json().catch(() => ({}))) as {
 			error?: string;
+			grants?: Array<{ companyId: string; canWrite: boolean }>;
 		};
 		setAdminWorking(false);
 
@@ -178,8 +285,11 @@ export default function SettingsPage() {
 			return;
 		}
 
-		setAdminStatus(`Updated company access for ${userEmail}.`);
+		setSelectedUserBaseGrants(payload.grants ?? grants);
+		syncCompanyPermissionDraft(companyId, payload.grants ?? grants);
+		setAdminStatus(`Updated ${userEmail} permissions for ${companyId}.`);
 		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
+		await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
 	}
 
 	return (
@@ -231,36 +341,139 @@ export default function SettingsPage() {
 
 						<Separator />
 
-						<div className="space-y-2">
-							<Label htmlFor="target-user">User email</Label>
-							<Input
-								id="target-user"
-								type="email"
-								placeholder="user@company.com"
-								value={targetUserEmail}
-								onChange={(event) => setTargetUserEmail(event.target.value)}
-							/>
+						<div className="grid gap-4 md:grid-cols-2">
+							<div className="space-y-2">
+								<Label htmlFor="manage-company">Manage company</Label>
+								<Select
+									value={activeCompanyId}
+									onValueChange={onCompanyChange}
+									disabled={allCompanies.length === 0}
+								>
+									<SelectTrigger id="manage-company">
+										<SelectValue placeholder="Create a company first" />
+									</SelectTrigger>
+									<SelectContent>
+										{allCompanies.map((companyId) => (
+											<SelectItem key={companyId} value={companyId}>
+												{companyId}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="user-search">Search Cognito users</Label>
+								<Input
+									id="user-search"
+									placeholder="Search by email or username"
+									value={userSearch}
+									onChange={(event) => setUserSearch(event.target.value)}
+								/>
+							</div>
 						</div>
 
-						<div className="space-y-2">
-							<Label htmlFor="target-companies">
-								Companies (comma separated)
-							</Label>
-							<Input
-								id="target-companies"
-								placeholder="acme-corp, beta-industries"
-								value={targetCompanies}
-								onChange={(event) => setTargetCompanies(event.target.value)}
-							/>
+						<div className="rounded-md border">
+							<div className="max-h-72 overflow-y-auto">
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>User</TableHead>
+											<TableHead>Status</TableHead>
+											<TableHead className="text-right">Action</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{filteredUsers.length === 0 ? (
+											<TableRow>
+												<TableCell
+													colSpan={3}
+													className="text-muted-foreground"
+												>
+													No matching Cognito users found.
+												</TableCell>
+											</TableRow>
+										) : (
+											filteredUsers.map((user) => {
+												const isSelected = user.email === selectedUserEmail;
+												return (
+													<TableRow
+														key={user.username}
+														className={isSelected ? "bg-accent/40" : ""}
+													>
+														<TableCell>
+															<div className="font-medium">{user.email}</div>
+															<div className="text-xs text-muted-foreground">
+																{user.username}
+															</div>
+														</TableCell>
+														<TableCell>
+															<Badge
+																variant={user.enabled ? "success" : "warning"}
+															>
+																{user.enabled ? user.status : "DISABLED"}
+															</Badge>
+														</TableCell>
+														<TableCell className="text-right">
+															<Button
+																size="sm"
+																variant={isSelected ? "default" : "outline"}
+																onClick={() =>
+																	void loadUserAccessAction(user.email)
+																}
+																disabled={loadingUserAccess}
+															>
+																{isSelected ? "Selected" : "Manage"}
+															</Button>
+														</TableCell>
+													</TableRow>
+												);
+											})
+										)}
+									</TableBody>
+								</Table>
+							</div>
 						</div>
+
+						{selectedUserEmail && activeCompanyId && (
+							<div className="space-y-3 rounded-md border p-4">
+								<p className="text-sm text-muted-foreground">
+									Managing{" "}
+									<span className="font-medium text-foreground">
+										{selectedUserEmail}
+									</span>{" "}
+									for company{" "}
+									<span className="font-medium text-foreground">
+										{activeCompanyId}
+									</span>
+									.
+								</p>
+								<div className="flex flex-wrap items-center gap-3">
+									<div className="flex items-center gap-2">
+										<Switch
+											checked={selectedUserHasAccess}
+											onCheckedChange={setSelectedUserHasAccess}
+										/>
+										<Label>Company access</Label>
+									</div>
+									<div className="flex items-center gap-2">
+										<Switch
+											checked={selectedUserCanWrite}
+											onCheckedChange={setSelectedUserCanWrite}
+											disabled={!selectedUserHasAccess}
+										/>
+										<Label>Write permission</Label>
+									</div>
+									<Button
+										onClick={() => void saveUserAccessAction()}
+										disabled={adminWorking || loadingUserAccess}
+									>
+										Save Permission
+									</Button>
+								</div>
+							</div>
+						)}
 
 						<div className="flex items-center gap-2">
-							<Button
-								onClick={() => void saveUserAccessAction()}
-								disabled={!targetUserEmail.trim() || adminWorking}
-							>
-								Save User Access
-							</Button>
 							{adminStatus && (
 								<p className="text-sm text-muted-foreground">{adminStatus}</p>
 							)}

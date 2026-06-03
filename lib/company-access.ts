@@ -2,6 +2,7 @@ import {
 	AdminGetUserCommand,
 	AdminListGroupsForUserCommand,
 	CognitoIdentityProviderClient,
+	ListUsersCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import {
 	GetObjectCommand,
@@ -18,6 +19,15 @@ export type CompanyGrant = {
 export type UserCompanyAccess = {
 	isSuperAdmin: boolean;
 	grants: CompanyGrant[];
+};
+
+export type CognitoUserSummary = {
+	username: string;
+	email: string;
+	enabled: boolean;
+	status: string;
+	createdAt: string | null;
+	updatedAt: string | null;
 };
 
 const filesBucket = process.env.FILES_BUCKET?.trim() || "";
@@ -367,4 +377,53 @@ export async function getUserCompanyAccessForAdmin(
 		isSuperAdmin: cognito.isSuperAdmin,
 		grants: mergeGrants([...stored, ...cognito.grants]),
 	};
+}
+
+function parseCognitoDate(value: Date | undefined): string | null {
+	if (!value) return null;
+	const timestamp = value.getTime();
+	if (Number.isNaN(timestamp)) return null;
+	return value.toISOString();
+}
+
+export async function listCognitoUsers(): Promise<CognitoUserSummary[]> {
+	const poolId = getPoolIdFromIssuer();
+	if (!poolId) return [];
+
+	const users: CognitoUserSummary[] = [];
+	let paginationToken: string | undefined;
+
+	do {
+		const response = await cognitoClient.send(
+			new ListUsersCommand({
+				UserPoolId: poolId,
+				Limit: 60,
+				PaginationToken: paginationToken,
+			}),
+		);
+
+		for (const user of response.Users ?? []) {
+			const attributes = Object.fromEntries(
+				(user.Attributes ?? []).map((attribute) => [
+					attribute.Name,
+					attribute.Value ?? "",
+				]),
+			);
+			const username = String(user.Username ?? "").trim();
+			if (!username) continue;
+			const email = normalizeEmail(String(attributes.email ?? username));
+			users.push({
+				username,
+				email,
+				enabled: user.Enabled !== false,
+				status: String(user.UserStatus ?? "UNKNOWN"),
+				createdAt: parseCognitoDate(user.UserCreateDate),
+				updatedAt: parseCognitoDate(user.UserLastModifiedDate),
+			});
+		}
+
+		paginationToken = response.PaginationToken;
+	} while (paginationToken);
+
+	return users.sort((a, b) => a.email.localeCompare(b.email));
 }

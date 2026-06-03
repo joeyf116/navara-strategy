@@ -6,6 +6,7 @@ import {
 	listAppPasswords,
 	revokeAppPassword,
 } from "@/lib/app-passwords";
+import { logger } from "@/lib/logger";
 
 function unauthorized() {
 	return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -19,11 +20,17 @@ export async function GET() {
 		return unauthorized();
 	}
 
+	logger.info("api/settings/app-passwords", "GET request", { email });
+
 	try {
 		const passwords = await listAppPasswords(email);
+		logger.info("api/settings/app-passwords", "GET success", {
+			email,
+			count: passwords.length,
+		});
 		return NextResponse.json({ passwords });
 	} catch (error) {
-		console.error("Failed to list app passwords", error);
+		logger.error("api/settings/app-passwords", "Failed to list app passwords", error, { email });
 		return NextResponse.json(
 			{ error: "Could not load app passwords." },
 			{ status: 500 },
@@ -52,10 +59,12 @@ export async function POST(request: Request) {
 			);
 		}
 
+		logger.info("api/settings/app-passwords", "POST create", { email, label });
 		const created = await createAppPassword(email, label);
+		logger.info("api/settings/app-passwords", "POST create success", { email, id: created.id });
 		return NextResponse.json(created, { status: 201 });
 	} catch (error) {
-		console.error("Failed to create app password", error);
+		logger.error("api/settings/app-passwords", "POST create failed", error, { email });
 		return NextResponse.json(
 			{
 				error:
@@ -89,10 +98,12 @@ export async function DELETE(request: Request) {
 			);
 		}
 
+		logger.info("api/settings/app-passwords", "DELETE revoke", { email, id });
 		await revokeAppPassword(email, id);
+		logger.info("api/settings/app-passwords", "DELETE revoke success", { email, id });
 		return NextResponse.json({ ok: true });
 	} catch (error) {
-		console.error("Failed to revoke app password", error);
+		logger.error("api/settings/app-passwords", "DELETE revoke failed", error, { email });
 		return NextResponse.json(
 			{ error: "Could not revoke app password." },
 			{ status: 500 },

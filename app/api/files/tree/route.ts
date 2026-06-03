@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { logger } from "@/lib/logger";
 import {
 	createFolderInMyFiles,
 	deleteNode,
@@ -22,14 +23,21 @@ export async function GET(request: Request) {
 		return unauthorized();
 	}
 
-	try {
-		const url = new URL(request.url);
-		const path = url.searchParams.get("path") ?? "/";
+	const url = new URL(request.url);
+	const path = url.searchParams.get("path") ?? "/";
 
+	logger.info("api/files/tree", "GET request", { email, path });
+
+	try {
 		const entries = await listViewerDirectory(email, path);
+		logger.info("api/files/tree", "GET success", {
+			email,
+			path,
+			count: entries.length,
+		});
 		return NextResponse.json({ path, entries });
 	} catch (error) {
-		console.error("Failed to load virtual directory", error);
+		logger.error("api/files/tree", "GET failed", error, { email, path });
 		return NextResponse.json(
 			{
 				error:
@@ -112,7 +120,7 @@ export async function POST(request: Request) {
 
 		return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
 	} catch (error) {
-		console.error("Failed to mutate virtual files", error);
+		logger.error("api/files/tree", "POST failed", error, { email });
 		return NextResponse.json(
 			{
 				error:
@@ -147,9 +155,10 @@ export async function PATCH(request: Request) {
 		}
 
 		await renameNode(email, id, name);
+		logger.info("api/files/tree", "PATCH rename success", { email, id, name });
 		return NextResponse.json({ ok: true });
 	} catch (error) {
-		console.error("Failed to rename virtual file", error);
+		logger.error("api/files/tree", "PATCH rename failed", error, { email });
 		return NextResponse.json(
 			{ error: error instanceof Error ? error.message : "Rename failed." },
 			{ status: 500 },
@@ -174,9 +183,12 @@ export async function DELETE(request: Request) {
 		}
 
 		await deleteNode(email, id);
+		logger.info("api/files/tree", "DELETE success", { email, id });
 		return NextResponse.json({ ok: true });
 	} catch (error) {
-		console.error("Failed to delete virtual file", error);
+		const url2 = new URL(request.url);
+		const nodeId = url2.searchParams.get("id")?.trim() || "(unknown)";
+		logger.error("api/files/tree", "DELETE failed", error, { email, id: nodeId });
 		return NextResponse.json(
 			{ error: error instanceof Error ? error.message : "Delete failed." },
 			{ status: 500 },

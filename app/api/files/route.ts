@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { canManageFiles, createSharedFile, listSharedFiles } from "@/lib/files";
+import { logger } from "@/lib/logger";
 
 const MAX_FILE_BYTES = (Number(process.env.MAX_UPLOAD_SIZE_MB ?? 25) || 25) * 1024 * 1024;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,14 +16,17 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
+    logger.info("api/files", "GET shared files", { email: user.email, role: user.role });
+
     const files = await listSharedFiles({
       viewerEmail: user.email,
       viewerRole: user.role,
     });
 
+    logger.info("api/files", "GET shared files success", { email: user.email, count: files.length });
     return NextResponse.json({ files });
   } catch (error) {
-    console.error("Failed to list files", error);
+    logger.error("api/files", "GET shared files failed", error);
     return NextResponse.json(
       { error: "Could not load shared files." },
       { status: 500 },

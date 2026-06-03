@@ -27,7 +27,6 @@ type AppPassword = {
 
 type ConnectionInfo = {
 	sftpEndpoint: string;
-	sftpUsername: string;
 	webdavUrl: string;
 	userEmail: string;
 };
@@ -90,7 +89,6 @@ export default function SettingsPage() {
 	const {
 		data: conn = {
 			sftpEndpoint: "",
-			sftpUsername: "",
 			webdavUrl: "",
 			userEmail: "",
 		},
@@ -126,10 +124,9 @@ export default function SettingsPage() {
 	const windowsUncPath = `\\\\${webDavHost}@SSL\\DavWWWRoot\\api\\dav`;
 
 	// Terminal quick-connect command
-	const sftpCommand =
-		conn.sftpEndpoint && conn.sftpUsername
-			? `sftp -P 22 ${conn.sftpUsername}@${conn.sftpEndpoint}`
-			: "";
+	const sftpCommand = conn.sftpEndpoint
+		? `sftp -P 22 <your-username>@${conn.sftpEndpoint}`
+		: "";
 
 	async function loadPasswords() {
 		await queryClient.invalidateQueries({ queryKey: ["app-passwords"] });
@@ -211,7 +208,11 @@ export default function SettingsPage() {
 							<div className="grid gap-4 sm:grid-cols-2">
 								<CopyField label="Host" value={conn.sftpEndpoint} />
 								<CopyField label="Port" value="22" placeholder="22" />
-								<CopyField label="Username" value={conn.sftpUsername} />
+								<CopyField
+									label="Username"
+									value=""
+									placeholder="Assigned by your administrator"
+								/>
 								<CopyField
 									label="Authentication"
 									value="SSH Key (private key)"

@@ -403,30 +403,32 @@ resource "aws_iam_role_policy" "transfer_user" {
           "s3:PutObject",
           "s3:DeleteObject"
         ]
-        Resource = "${aws_s3_bucket.transfer.arn}/clients/${var.transfer_user_name}/*"
+        Resource = "${aws_s3_bucket.transfer.arn}/clients/*"
       }
     ]
   })
 }
 
-resource "aws_transfer_user" "client" {
+resource "aws_transfer_user" "clients" {
+  for_each  = var.transfer_users
   server_id = aws_transfer_server.this.id
-  user_name = var.transfer_user_name
+  user_name = each.key
   role      = aws_iam_role.transfer_user.arn
 
   home_directory_type = "LOGICAL"
   home_directory_mappings {
     entry  = "/"
-    target = "/${aws_s3_bucket.transfer.bucket}/clients/${var.transfer_user_name}"
+    target = "/${aws_s3_bucket.transfer.bucket}/clients/${each.key}"
   }
 
   tags = local.common_tags
 }
 
-resource "aws_transfer_ssh_key" "client" {
+resource "aws_transfer_ssh_key" "clients" {
+  for_each  = var.transfer_users
   server_id = aws_transfer_server.this.id
-  user_name = aws_transfer_user.client.user_name
-  body      = var.transfer_user_public_key
+  user_name = aws_transfer_user.clients[each.key].user_name
+  body      = each.value
 }
 
 # -----------------------------------------------------------------------------
@@ -607,7 +609,6 @@ resource "aws_lambda_function" "web" {
       FILES_BUCKET        = aws_s3_bucket.transfer.bucket
       FILES_BUCKET_PREFIX = var.files_bucket_prefix
       SFTP_ENDPOINT       = aws_transfer_server.this.endpoint
-      SFTP_USERNAME       = var.transfer_user_name
     }
   }
 

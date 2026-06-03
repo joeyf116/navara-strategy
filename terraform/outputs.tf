@@ -43,9 +43,9 @@ output "sftp_endpoint" {
   description = "AWS Transfer Family endpoint"
 }
 
-output "sftp_username" {
-  value       = aws_transfer_user.client.user_name
-  description = "Provisioned SFTP username"
+output "sftp_usernames" {
+  value       = keys(aws_transfer_user.clients)
+  description = "Provisioned SFTP usernames"
 }
 
 output "sftp_bucket" {

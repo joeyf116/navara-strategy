@@ -110,15 +110,10 @@ variable "app_public_url" {
 
 # ---------- Transfer Family ----------
 
-variable "transfer_user_name" {
-  description = "SFTP username in AWS Transfer Family"
-  type        = string
-  default     = "client-upload"
-}
-
-variable "transfer_user_public_key" {
-  description = "SSH public key for the SFTP user"
-  type        = string
+variable "transfer_users" {
+  description = "Map of SFTP username to SSH public key. Each user is isolated to /{bucket}/clients/{username}/. Add a client by adding an entry here and running terraform apply."
+  type        = map(string)
+  default     = {}
 }
 
 # ---------- Observability ----------

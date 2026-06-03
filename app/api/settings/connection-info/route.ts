@@ -11,13 +11,11 @@ export async function GET() {
 	}
 
 	const sftpEndpoint = process.env.SFTP_ENDPOINT ?? "";
-	const sftpUsername = process.env.SFTP_USERNAME ?? "client-upload";
 	const appUrl = process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "";
 	const webdavUrl = appUrl ? `${appUrl}/api/dav` : "";
 
 	return NextResponse.json({
 		sftpEndpoint,
-		sftpUsername,
 		webdavUrl,
 		userEmail: email,
 	});

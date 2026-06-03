@@ -97,7 +97,6 @@ jobs:
             -target=aws_ecr_repository.app \
             -target=aws_ecr_lifecycle_policy.app \
             -var="app_image_identifier=public.ecr.aws/docker/library/node:22-alpine" \
-            -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}" \
             -var="cognito_domain=${{ env.COGNITO_DOMAIN }}" \
             -var='cognito_callback_urls=${{ env.COGNITO_CALLBACK_URLS }}' \
             -var='cognito_logout_urls=${{ env.COGNITO_LOGOUT_URLS }}' \
@@ -169,7 +168,6 @@ jobs:
             -input=false \
             -no-color \
             -var="app_image_identifier=${{ needs.build-push.outputs.image_uri }}" \
-            -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}" \
             -var="cognito_domain=${{ env.COGNITO_DOMAIN }}" \
             -var='cognito_callback_urls=${{ env.COGNITO_CALLBACK_URLS }}' \
             -var='cognito_logout_urls=${{ env.COGNITO_LOGOUT_URLS }}' \

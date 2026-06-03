@@ -26,9 +26,13 @@ app_public_url          = "https://d2i0sz4mcgor37.cloudfront.net"
 # File portal behavior
 files_bucket_prefix     = "uploads"
 
-# Transfer Family (SFTP)
-transfer_user_name      = "client-upload"
-transfer_user_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+# Transfer Family (SFTP) — add one entry per client
+# Key: SFTP username (alphanumeric, hyphens OK, 3-100 chars, no @)
+# Value: client's SSH public key
+transfer_users = {
+  "client-acme"  = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... acme"
+  "client-jones" = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... jones"
+}
 
 # Cognito
 cognito_domain          = "navara-sftp-911788523695"

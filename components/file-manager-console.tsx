@@ -3,16 +3,23 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	ColumnDef,
+	flexRender,
+	getCoreRowModel,
+	useReactTable,
+} from "@tanstack/react-table";
+import {
 	ChevronRight,
-	FileText,
+	File,
 	Folder,
-	FolderPlus,
 	Loader2,
 	MoreHorizontal,
+	Plus,
 	RefreshCw,
 	Upload,
 } from "lucide-react";
 
+import { CreateCompanyDialog } from "@/components/create-company-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -52,9 +59,32 @@ type Entry = {
 	virtualPath: string;
 };
 
+type ConnectionInfo = {
+	isSuperAdmin: boolean;
+};
+
+type RowData =
+	| {
+			kind: "go-back";
+			id: string;
+			name: string;
+			sizeBytes: number;
+			updatedAt: string;
+			entry: null;
+	  }
+	| {
+			kind: "entry";
+			id: string;
+			name: string;
+			sizeBytes: number;
+			updatedAt: string;
+			entry: Entry;
+	  };
+
 type DialogState =
 	| { type: "closed" }
 	| { type: "newFolder" }
+	| { type: "upload" }
 	| { type: "rename"; entry: Entry }
 	| { type: "delete"; entry: Entry };
 
@@ -68,6 +98,7 @@ function formatSize(bytes: number) {
 }
 
 function formatModified(value: string) {
+	if (!value) return "-";
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "-";
 	return new Intl.DateTimeFormat(undefined, {
@@ -83,9 +114,19 @@ async function parseJson<T>(response: Response): Promise<T> {
 	return (await response.json().catch(() => ({}))) as T;
 }
 
+function segmentsToPath(segments: string[]): string {
+	if (segments.length === 0) return "/";
+	return `/${segments.join("/")}`;
+}
+
+function displayPath(segments: string[]): string {
+	if (segments.length === 0) return "/root/";
+	return `/root/${segments.join("/")}/`;
+}
+
 export function FileManagerConsole() {
 	const queryClient = useQueryClient();
-	const [currentPath, setCurrentPath] = useState("/");
+	const [currentPath, setCurrentPath] = useState<string[]>([]);
 	const [status, setStatus] = useState<{
 		message: string;
 		error?: boolean;
@@ -94,31 +135,56 @@ export function FileManagerConsole() {
 	const [dialog, setDialog] = useState<DialogState>({ type: "closed" });
 	const [folderName, setFolderName] = useState("");
 	const [renameName, setRenameName] = useState("");
-	const fileInputRef = useRef<HTMLInputElement>(null);
+	const [uploadFile, setUploadFile] = useState<File | null>(null);
+	const uploadInputRef = useRef<HTMLInputElement>(null);
+
+	const currentPathString = useMemo(
+		() => segmentsToPath(currentPath),
+		[currentPath],
+	);
+	const destinationLabel = useMemo(
+		() => displayPath(currentPath),
+		[currentPath],
+	);
 
 	const {
 		data: entries = [],
 		isFetching,
 		error: loadError,
 	} = useQuery<Entry[]>({
-		queryKey: ["files-tree", currentPath],
+		queryKey: ["files-tree", currentPathString],
 		queryFn: async () => {
 			const response = await fetch(
-				`/api/files/tree?path=${encodeURIComponent(currentPath)}`,
+				`/api/files/tree?path=${encodeURIComponent(currentPathString)}`,
 			);
 			const payload = await parseJson<{ entries?: Entry[]; error?: string }>(
 				response,
 			);
-			if (!response.ok)
+			if (!response.ok) {
 				throw new Error(payload.error ?? "Failed to load files.");
+			}
 			return payload.entries ?? [];
+		},
+	});
+
+	const { data: connection = null } = useQuery<ConnectionInfo>({
+		queryKey: ["connection-info"],
+		queryFn: async () => {
+			const response = await fetch("/api/settings/connection-info");
+			const payload = await parseJson<ConnectionInfo & { error?: string }>(
+				response,
+			);
+			if (!response.ok) {
+				throw new Error(payload.error ?? "Failed to load connection info.");
+			}
+			return payload;
 		},
 	});
 
 	const refreshMutation = useMutation({
 		mutationFn: async () => {
 			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPath],
+				queryKey: ["files-tree", currentPathString],
 			});
 		},
 	});
@@ -130,7 +196,7 @@ export function FileManagerConsole() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					action: "createFolder",
-					path: currentPath,
+					path: currentPathString,
 					name,
 				}),
 			});
@@ -140,65 +206,17 @@ export function FileManagerConsole() {
 			}
 		},
 		onSuccess: async (_, name) => {
-			setStatus({ message: `Created folder ${name}.` });
-			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPath],
-			});
+			setStatus({ message: `Created folder ${name} in ${destinationLabel}` });
+			setFolderName("");
 			setDialog({ type: "closed" });
+			await queryClient.invalidateQueries({
+				queryKey: ["files-tree", currentPathString],
+			});
 		},
 		onError: (error) => {
 			setStatus({
 				message:
 					error instanceof Error ? error.message : "Failed to create folder.",
-				error: true,
-			});
-		},
-	});
-
-	const renameMutation = useMutation({
-		mutationFn: async (payload: { id: string; name: string }) => {
-			const response = await fetch("/api/files/tree", {
-				method: "PATCH",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(payload),
-			});
-			const body = await parseJson<{ error?: string }>(response);
-			if (!response.ok) throw new Error(body.error ?? "Rename failed.");
-		},
-		onSuccess: async () => {
-			setStatus({ message: "Item renamed." });
-			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPath],
-			});
-			setDialog({ type: "closed" });
-		},
-		onError: (error) => {
-			setStatus({
-				message: error instanceof Error ? error.message : "Rename failed.",
-				error: true,
-			});
-		},
-	});
-
-	const deleteMutation = useMutation({
-		mutationFn: async (id: string) => {
-			const response = await fetch(
-				`/api/files/tree?id=${encodeURIComponent(id)}`,
-				{ method: "DELETE" },
-			);
-			const body = await parseJson<{ error?: string }>(response);
-			if (!response.ok) throw new Error(body.error ?? "Delete failed.");
-		},
-		onSuccess: async () => {
-			setStatus({ message: "Item deleted." });
-			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPath],
-			});
-			setDialog({ type: "closed" });
-		},
-		onError: (error) => {
-			setStatus({
-				message: error instanceof Error ? error.message : "Delete failed.",
 				error: true,
 			});
 		},
@@ -226,15 +244,17 @@ export function FileManagerConsole() {
 				xhr.onerror = () => reject(new Error("Upload failed."));
 
 				const formData = new FormData();
-				formData.append("path", currentPath);
+				formData.append("path", currentPathString);
 				formData.append("file", file);
 				xhr.send(formData);
 			});
 		},
 		onSuccess: async () => {
-			setStatus({ message: "Upload complete." });
+			setStatus({ message: `Uploaded file to ${destinationLabel}` });
+			setUploadFile(null);
+			setDialog({ type: "closed" });
 			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPath],
+				queryKey: ["files-tree", currentPathString],
 			});
 		},
 		onError: (error) => {
@@ -245,6 +265,55 @@ export function FileManagerConsole() {
 		},
 		onSettled: () => {
 			setUploadProgress(null);
+		},
+	});
+
+	const renameMutation = useMutation({
+		mutationFn: async (payload: { id: string; name: string }) => {
+			const response = await fetch("/api/files/tree", {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			});
+			const body = await parseJson<{ error?: string }>(response);
+			if (!response.ok) throw new Error(body.error ?? "Rename failed.");
+		},
+		onSuccess: async () => {
+			setStatus({ message: "Item renamed." });
+			setDialog({ type: "closed" });
+			await queryClient.invalidateQueries({
+				queryKey: ["files-tree", currentPathString],
+			});
+		},
+		onError: (error) => {
+			setStatus({
+				message: error instanceof Error ? error.message : "Rename failed.",
+				error: true,
+			});
+		},
+	});
+
+	const deleteMutation = useMutation({
+		mutationFn: async (id: string) => {
+			const response = await fetch(
+				`/api/files/tree?id=${encodeURIComponent(id)}`,
+				{ method: "DELETE" },
+			);
+			const body = await parseJson<{ error?: string }>(response);
+			if (!response.ok) throw new Error(body.error ?? "Delete failed.");
+		},
+		onSuccess: async () => {
+			setStatus({ message: "Item deleted." });
+			setDialog({ type: "closed" });
+			await queryClient.invalidateQueries({
+				queryKey: ["files-tree", currentPathString],
+			});
+		},
+		onError: (error) => {
+			setStatus({
+				message: error instanceof Error ? error.message : "Delete failed.",
+				error: true,
+			});
 		},
 	});
 
@@ -262,29 +331,184 @@ export function FileManagerConsole() {
 
 	const isDialogWorking =
 		createFolderMutation.isPending ||
+		uploadMutation.isPending ||
 		renameMutation.isPending ||
 		deleteMutation.isPending;
 
-	const breadcrumbs = useMemo(() => {
-		const segments = currentPath.split("/").filter(Boolean);
-		const parts = [{ label: "Root", path: "/" }];
-		for (let i = 0; i < segments.length; i++) {
-			parts.push({
-				label: segments[i],
-				path: `/${segments.slice(0, i + 1).join("/")}`,
+	const breadcrumbItems = useMemo(() => {
+		const items: Array<{ label: string; path: string[] }> = [
+			{ label: "root", path: [] },
+		];
+		for (let i = 0; i < currentPath.length; i++) {
+			items.push({
+				label: currentPath[i],
+				path: currentPath.slice(0, i + 1),
 			});
 		}
-		return parts;
+		return items;
 	}, [currentPath]);
 
-	function navigate(path: string) {
+	const rows = useMemo<RowData[]>(() => {
+		const data: RowData[] = entries.map((entry) => ({
+			kind: "entry",
+			id: entry.id,
+			name: entry.name,
+			sizeBytes: entry.sizeBytes,
+			updatedAt: entry.updatedAt,
+			entry,
+		}));
+		if (currentPath.length > 0) {
+			data.unshift({
+				kind: "go-back",
+				id: "go-back",
+				name: ".. / Go Back",
+				sizeBytes: 0,
+				updatedAt: "",
+				entry: null,
+			});
+		}
+		return data;
+	}, [entries, currentPath.length]);
+
+	function navigateToPath(path: string[]) {
 		setStatus(null);
 		setCurrentPath(path);
 	}
 
-	function closeDialog() {
-		setDialog({ type: "closed" });
-	}
+	const columns = useMemo<ColumnDef<RowData>[]>(
+		() => [
+			{
+				accessorKey: "name",
+				header: "Name",
+				cell: ({ row }) => {
+					const item = row.original;
+					if (item.kind === "go-back") {
+						return (
+							<button
+								type="button"
+								onClick={() => navigateToPath(currentPath.slice(0, -1))}
+								className="flex items-center gap-2 font-medium text-muted-foreground hover:text-foreground"
+							>
+								<ChevronRight
+									className="h-4 w-4 rotate-180"
+									aria-hidden="true"
+								/>
+								<span>{item.name}</span>
+							</button>
+						);
+					}
+
+					const entry = item.entry;
+					if (!entry) return null;
+
+					return (
+						<button
+							type="button"
+							className="flex min-w-0 items-center gap-2 text-left font-medium hover:underline"
+							onClick={() => {
+								if (entry.kind === "folder") {
+									navigateToPath([...currentPath, entry.name]);
+								}
+							}}
+							disabled={entry.kind !== "folder"}
+						>
+							{entry.kind === "folder" ? (
+								<Folder
+									className="h-4 w-4 shrink-0 text-amber-500"
+									aria-hidden="true"
+								/>
+							) : (
+								<File
+									className="h-4 w-4 shrink-0 text-muted-foreground"
+									aria-hidden="true"
+								/>
+							)}
+							<span className="truncate">{entry.name}</span>
+						</button>
+					);
+				},
+			},
+			{
+				accessorKey: "sizeBytes",
+				header: "Size",
+				cell: ({ row }) => {
+					const item = row.original;
+					if (item.kind === "go-back") return "-";
+					if (item.entry?.kind === "folder") return "-";
+					return formatSize(item.sizeBytes);
+				},
+			},
+			{
+				accessorKey: "updatedAt",
+				header: "Last Modified",
+				cell: ({ row }) => {
+					const item = row.original;
+					if (item.kind === "go-back") return "-";
+					return formatModified(item.updatedAt);
+				},
+			},
+			{
+				id: "actions",
+				header: "Actions",
+				cell: ({ row }) => {
+					const item = row.original;
+					if (item.kind === "go-back") return null;
+					const entry = item.entry;
+					if (!entry) return null;
+					return (
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button
+									variant="outline"
+									size="sm"
+									className="h-7 w-7 p-0"
+									aria-label={`Actions for ${entry.name}`}
+								>
+									<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end">
+								{entry.kind === "file" ? (
+									<DropdownMenuItem
+										onClick={() => {
+											window.location.href = `/api/files/tree/download/${entry.id}`;
+										}}
+									>
+										Download
+									</DropdownMenuItem>
+								) : null}
+								{entry.kind === "file" ? <DropdownMenuSeparator /> : null}
+								<DropdownMenuItem
+									onClick={() => {
+										setRenameName(entry.name);
+										setDialog({ type: "rename", entry });
+									}}
+									disabled={!entry.canWrite}
+								>
+									Rename
+								</DropdownMenuItem>
+								<DropdownMenuSeparator />
+								<DropdownMenuItem
+									className="text-destructive focus:text-destructive"
+									onClick={() => setDialog({ type: "delete", entry })}
+									disabled={!entry.canWrite}
+								>
+									Delete
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					);
+				},
+			},
+		],
+		[currentPath],
+	);
+
+	const table = useReactTable({
+		data: rows,
+		columns,
+		getCoreRowModel: getCoreRowModel(),
+	});
 
 	return (
 		<>
@@ -296,69 +520,36 @@ export function FileManagerConsole() {
 							Browse company folders and manage file operations.
 						</p>
 					</div>
-					<div className="flex items-center gap-1.5">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setDialog({ type: "newFolder" })}
-							className="h-8 px-2.5"
-						>
-							<FolderPlus className="mr-2 h-4 w-4" aria-hidden="true" />
-							New Folder
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => void refreshMutation.mutateAsync()}
-							disabled={refreshMutation.isPending}
-							className="h-8 px-2.5"
-						>
-							<RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-							Refresh
-						</Button>
-						<Button
-							size="sm"
-							onClick={() => fileInputRef.current?.click()}
-							disabled={uploadMutation.isPending}
-							className="h-8 px-2.5"
-						>
-							<Upload className="mr-2 h-4 w-4" aria-hidden="true" />
-							Upload
-						</Button>
-						<input
-							ref={fileInputRef}
-							type="file"
-							className="hidden"
-							onChange={(event) => {
-								const file = event.target.files?.[0];
-								if (file) {
-									void uploadMutation.mutateAsync(file);
-								}
-								event.currentTarget.value = "";
-							}}
+					{connection?.isSuperAdmin ? (
+						<CreateCompanyDialog
+							onCreated={(message) => setStatus({ message })}
+							disabled={isFetching}
 						/>
-					</div>
+					) : null}
 				</div>
 
 				<Card>
-					<CardHeader className="space-y-2 pb-1">
+					<CardHeader className="space-y-2 pb-2">
 						<CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-							Path
+							Actions in: {destinationLabel}
 						</CardTitle>
-						<nav className="flex flex-wrap items-center gap-1 text-xs">
-							{breadcrumbs.map((crumb, index) => (
-								<span key={crumb.path} className="flex items-center gap-1">
-									{index > 0 && (
+						<div className="flex flex-wrap items-center gap-2 text-xs">
+							{breadcrumbItems.map((crumb, index) => (
+								<span
+									key={`${crumb.label}-${index}`}
+									className="flex items-center gap-1"
+								>
+									{index > 0 ? (
 										<ChevronRight
 											className="h-3.5 w-3.5 text-muted-foreground"
 											aria-hidden="true"
 										/>
-									)}
+									) : null}
 									<button
 										type="button"
-										onClick={() => navigate(crumb.path)}
+										onClick={() => navigateToPath(crumb.path)}
 										className={
-											index === breadcrumbs.length - 1
+											index === breadcrumbItems.length - 1
 												? "font-medium text-foreground"
 												: "text-muted-foreground hover:text-foreground"
 										}
@@ -367,11 +558,44 @@ export function FileManagerConsole() {
 									</button>
 								</span>
 							))}
-						</nav>
-						{uploadProgress !== null && (
+						</div>
+
+						<div className="flex flex-wrap items-center gap-1.5">
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setDialog({ type: "newFolder" })}
+								className="h-8 px-2.5"
+							>
+								<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+								New Folder
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setDialog({ type: "upload" })}
+								disabled={uploadMutation.isPending}
+								className="h-8 px-2.5"
+							>
+								<Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+								Upload File
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => void refreshMutation.mutateAsync()}
+								disabled={refreshMutation.isPending}
+								className="h-8 px-2.5"
+							>
+								<RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+								Refresh
+							</Button>
+						</div>
+
+						{uploadProgress !== null ? (
 							<div className="space-y-1">
 								<p className="text-[11px] text-muted-foreground">
-									Uploading… {uploadProgress}%
+									Uploading to {destinationLabel} {uploadProgress}%
 								</p>
 								<div className="h-1.5 w-full rounded-full bg-muted">
 									<div
@@ -380,137 +604,65 @@ export function FileManagerConsole() {
 									/>
 								</div>
 							</div>
-						)}
-						{activeStatus && (
+						) : null}
+
+						{activeStatus ? (
 							<p
 								className={`text-xs ${activeStatus.error ? "text-destructive" : "text-muted-foreground"}`}
 							>
 								{activeStatus.message}
 							</p>
-						)}
+						) : null}
 					</CardHeader>
+
 					<CardContent className="px-0 pb-0">
 						<Table>
 							<TableHeader>
-								<TableRow>
-									<TableHead className="h-8 pl-5 text-xs">Name</TableHead>
-									<TableHead className="hidden h-8 text-xs md:table-cell">
-										Owner
-									</TableHead>
-									<TableHead className="hidden sm:table-cell">
-										Modified
-									</TableHead>
-									<TableHead className="hidden h-8 text-xs sm:table-cell">
-										Size
-									</TableHead>
-									<TableHead className="h-8 w-10 pr-3" />
-								</TableRow>
+								{table.getHeaderGroups().map((headerGroup) => (
+									<TableRow key={headerGroup.id}>
+										{headerGroup.headers.map((header) => (
+											<TableHead key={header.id}>
+												{header.isPlaceholder
+													? null
+													: flexRender(
+															header.column.columnDef.header,
+															header.getContext(),
+														)}
+											</TableHead>
+										))}
+									</TableRow>
+								))}
 							</TableHeader>
 							<TableBody>
 								{isFetching ? (
 									<TableRow>
-										<TableCell colSpan={5} className="py-6 text-center">
+										<TableCell colSpan={4} className="py-6 text-center">
 											<Loader2
 												className="mx-auto h-5 w-5 animate-spin text-muted-foreground"
 												aria-hidden="true"
 											/>
 										</TableCell>
 									</TableRow>
-								) : entries.length === 0 ? (
+								) : table.getRowModel().rows.length === 0 ? (
 									<TableRow>
 										<TableCell
-											colSpan={5}
+											colSpan={4}
 											className="py-6 text-center text-xs text-muted-foreground"
 										>
-											No items in this folder.
+											No items in this directory.
 										</TableCell>
 									</TableRow>
 								) : (
-									entries.map((entry) => (
-										<TableRow key={entry.id}>
-											<TableCell className="py-2 pl-5">
-												<button
-													type="button"
-													className="flex min-w-0 items-center gap-2 text-left font-medium hover:underline"
-													onClick={() => {
-														if (entry.kind === "folder")
-															navigate(entry.virtualPath);
-													}}
-													disabled={entry.kind !== "folder"}
-												>
-													{entry.kind === "folder" ? (
-														<Folder
-															className="h-4 w-4 shrink-0 text-amber-500"
-															aria-hidden="true"
-														/>
-													) : (
-														<FileText
-															className="h-4 w-4 shrink-0 text-muted-foreground"
-															aria-hidden="true"
-														/>
+									table.getRowModel().rows.map((row) => (
+										<TableRow key={row.id}>
+											{row.getVisibleCells().map((cell) => (
+												<TableCell key={cell.id}>
+													{flexRender(
+														cell.column.columnDef.cell,
+														cell.getContext(),
 													)}
-													<span className="truncate">{entry.name}</span>
-												</button>
-											</TableCell>
-											<TableCell className="hidden py-2 text-xs text-muted-foreground md:table-cell">
-												{entry.ownerEmail}
-											</TableCell>
-											<TableCell className="hidden py-2 text-xs text-muted-foreground sm:table-cell">
-												{formatModified(entry.updatedAt)}
-											</TableCell>
-											<TableCell className="hidden py-2 text-xs text-muted-foreground sm:table-cell">
-												{entry.kind === "file"
-													? formatSize(entry.sizeBytes)
-													: "-"}
-											</TableCell>
-											<TableCell className="py-2 pr-3">
-												<DropdownMenu>
-													<DropdownMenuTrigger asChild>
-														<Button
-															variant="outline"
-															size="sm"
-															className="h-6 w-6 p-0"
-															aria-label={`Actions for ${entry.name}`}
-														>
-															<MoreHorizontal
-																className="h-4 w-4"
-																aria-hidden="true"
-															/>
-														</Button>
-													</DropdownMenuTrigger>
-													<DropdownMenuContent align="end">
-														{entry.kind === "file" && (
-															<DropdownMenuItem
-																onClick={() => {
-																	window.location.href = `/api/files/tree/download/${entry.id}`;
-																}}
-															>
-																Download
-															</DropdownMenuItem>
-														)}
-														{entry.kind === "file" && <DropdownMenuSeparator />}
-														<DropdownMenuItem
-															onClick={() => {
-																setRenameName(entry.name);
-																setDialog({ type: "rename", entry });
-															}}
-															disabled={!entry.canWrite}
-														>
-															Rename
-														</DropdownMenuItem>
-														<DropdownMenuSeparator />
-														<DropdownMenuItem
-															className="text-destructive focus:text-destructive"
-															onClick={() =>
-																setDialog({ type: "delete", entry })
-															}
-															disabled={!entry.canWrite}
-														>
-															Delete
-														</DropdownMenuItem>
-													</DropdownMenuContent>
-												</DropdownMenu>
-											</TableCell>
+												</TableCell>
+											))}
 										</TableRow>
 									))
 								)}
@@ -522,13 +674,13 @@ export function FileManagerConsole() {
 
 			<Dialog
 				open={dialog.type === "newFolder"}
-				onOpenChange={(open) => !open && closeDialog()}
+				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>New Folder</DialogTitle>
+						<DialogTitle>Create New Folder</DialogTitle>
 						<DialogDescription>
-							Create a folder in {currentPath}.
+							This folder will be created inside: {destinationLabel}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-1.5">
@@ -543,9 +695,7 @@ export function FileManagerConsole() {
 							onKeyDown={(event) => {
 								if (event.key === "Enter") {
 									const name = folderName.trim();
-									if (name) {
-										void createFolderMutation.mutateAsync(name);
-									}
+									if (name) void createFolderMutation.mutateAsync(name);
 								}
 							}}
 						/>
@@ -553,7 +703,7 @@ export function FileManagerConsole() {
 					<DialogFooter>
 						<Button
 							variant="outline"
-							onClick={closeDialog}
+							onClick={() => setDialog({ type: "closed" })}
 							disabled={isDialogWorking}
 						>
 							Cancel
@@ -561,19 +711,67 @@ export function FileManagerConsole() {
 						<Button
 							onClick={() => {
 								const name = folderName.trim();
-								if (name) {
-									void createFolderMutation.mutateAsync(name);
-								}
+								if (name) void createFolderMutation.mutateAsync(name);
 							}}
 							disabled={!folderName.trim() || isDialogWorking}
 						>
-							{createFolderMutation.isPending && (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
-							)}
-							Create
+							{createFolderMutation.isPending ? (
+								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Create Folder
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			<Dialog
+				open={dialog.type === "upload"}
+				onOpenChange={(open) => {
+					if (!open) {
+						setDialog({ type: "closed" });
+						setUploadFile(null);
+					}
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Upload File</DialogTitle>
+						<DialogDescription>
+							This file will be uploaded inside: {destinationLabel}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-2">
+						<Label htmlFor="upload-file">Select File</Label>
+						<Input
+							id="upload-file"
+							type="file"
+							ref={uploadInputRef}
+							onChange={(event) => {
+								setUploadFile(event.target.files?.[0] ?? null);
+							}}
+						/>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={() => {
+								setDialog({ type: "closed" });
+								setUploadFile(null);
+							}}
+							disabled={isDialogWorking}
+						>
+							Cancel
+						</Button>
+						<Button
+							onClick={() => {
+								if (uploadFile) void uploadMutation.mutateAsync(uploadFile);
+							}}
+							disabled={!uploadFile || isDialogWorking}
+						>
+							{uploadMutation.isPending ? (
+								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Upload
 						</Button>
 					</DialogFooter>
 				</DialogContent>
@@ -581,7 +779,7 @@ export function FileManagerConsole() {
 
 			<Dialog
 				open={dialog.type === "rename"}
-				onOpenChange={(open) => !open && closeDialog()}
+				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
 				<DialogContent>
 					<DialogHeader>
@@ -599,23 +797,12 @@ export function FileManagerConsole() {
 							autoComplete="off"
 							value={renameName}
 							onChange={(event) => setRenameName(event.target.value)}
-							onKeyDown={(event) => {
-								if (event.key === "Enter" && dialog.type === "rename") {
-									const name = renameName.trim();
-									if (name && name !== dialog.entry.name) {
-										void renameMutation.mutateAsync({
-											id: dialog.entry.id,
-											name,
-										});
-									}
-								}
-							}}
 						/>
 					</div>
 					<DialogFooter>
 						<Button
 							variant="outline"
-							onClick={closeDialog}
+							onClick={() => setDialog({ type: "closed" })}
 							disabled={isDialogWorking}
 						>
 							Cancel
@@ -623,13 +810,12 @@ export function FileManagerConsole() {
 						<Button
 							onClick={() => {
 								if (dialog.type !== "rename") return;
-								const name = renameName.trim();
-								if (name && name !== dialog.entry.name) {
-									void renameMutation.mutateAsync({
-										id: dialog.entry.id,
-										name,
-									});
-								}
+								const nextName = renameName.trim();
+								if (!nextName || nextName === dialog.entry.name) return;
+								void renameMutation.mutateAsync({
+									id: dialog.entry.id,
+									name: nextName,
+								});
 							}}
 							disabled={
 								dialog.type !== "rename" ||
@@ -639,12 +825,9 @@ export function FileManagerConsole() {
 								isDialogWorking
 							}
 						>
-							{renameMutation.isPending && (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
-							)}
+							{renameMutation.isPending ? (
+								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
 							Save
 						</Button>
 					</DialogFooter>
@@ -653,7 +836,7 @@ export function FileManagerConsole() {
 
 			<Dialog
 				open={dialog.type === "delete"}
-				onOpenChange={(open) => !open && closeDialog()}
+				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
 				<DialogContent>
 					<DialogHeader>
@@ -666,7 +849,7 @@ export function FileManagerConsole() {
 					<DialogFooter>
 						<Button
 							variant="outline"
-							onClick={closeDialog}
+							onClick={() => setDialog({ type: "closed" })}
 							disabled={isDialogWorking}
 						>
 							Cancel
@@ -681,12 +864,9 @@ export function FileManagerConsole() {
 							}}
 							disabled={dialog.type !== "delete" || isDialogWorking}
 						>
-							{deleteMutation.isPending && (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
-							)}
+							{deleteMutation.isPending ? (
+								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
 							Delete
 						</Button>
 					</DialogFooter>

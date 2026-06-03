@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
-import { listCognitoUsers } from "@/lib/company-access";
+import {
+	getUserCompanyAccessForAdmin,
+	listCognitoUsers,
+} from "@/lib/company-access";
 
 function unauthorized() {
 	return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -26,7 +29,21 @@ export async function GET() {
 
 	try {
 		const users = await listCognitoUsers();
-		return NextResponse.json({ users });
+		const usersWithGrants = await Promise.all(
+			users.map(async (user) => {
+				const access = await getUserCompanyAccessForAdmin(user.email).catch(
+					() => ({
+						isSuperAdmin: false,
+						grants: [],
+					}),
+				);
+				return {
+					...user,
+					grants: access.grants,
+				};
+			}),
+		);
+		return NextResponse.json({ users: usersWithGrants });
 	} catch {
 		return NextResponse.json(
 			{ error: "Could not load Cognito users." },

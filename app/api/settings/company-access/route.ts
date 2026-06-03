@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import {
-	createCompany,
+	createCompanyAndAssignUsers,
 	getUserCompanyAccessForAdmin,
 	listAllCompanies,
 	resolveUserCompanyAccess,
+	setBulkUserCompanyAccess,
 	setUserCompanyAccess,
 	type CompanyGrant,
 } from "@/lib/company-access";
@@ -82,9 +83,11 @@ export async function POST(request: Request) {
 	}
 
 	const body = (await request.json().catch(() => null)) as {
-		action?: "createCompany" | "setUserAccess";
+		action?: "createCompany" | "setUserAccess" | "setBulkUserAccess";
 		companyId?: string;
+		grantUserEmails?: unknown;
 		userEmail?: string;
+		userEmails?: unknown;
 		grants?: unknown;
 	} | null;
 
@@ -97,8 +100,20 @@ export async function POST(request: Request) {
 				{ status: 400 },
 			);
 		}
-		const created = await createCompany(companyId);
-		return NextResponse.json({ companyId: created }, { status: 201 });
+		const grantUserEmails = Array.isArray(body.grantUserEmails)
+			? body.grantUserEmails
+					.map((value) =>
+						String(value ?? "")
+							.trim()
+							.toLowerCase(),
+					)
+					.filter(Boolean)
+			: [];
+		const created = await createCompanyAndAssignUsers(
+			companyId,
+			grantUserEmails,
+		);
+		return NextResponse.json(created, { status: 201 });
 	}
 
 	if (body?.action === "setUserAccess") {
@@ -115,6 +130,31 @@ export async function POST(request: Request) {
 		const grants = normalizeGrants(body.grants);
 		const updated = await setUserCompanyAccess(userEmail, grants);
 		return NextResponse.json({ userEmail, grants: updated });
+	}
+
+	if (body?.action === "setBulkUserAccess") {
+		if (role !== "super_admin") return forbidden();
+
+		const userEmails = Array.isArray(body.userEmails)
+			? body.userEmails
+					.map((value) =>
+						String(value ?? "")
+							.trim()
+							.toLowerCase(),
+					)
+					.filter(Boolean)
+			: [];
+
+		if (userEmails.length === 0) {
+			return NextResponse.json(
+				{ error: "userEmails is required." },
+				{ status: 400 },
+			);
+		}
+
+		const grants = normalizeGrants(body.grants);
+		const updatedUsers = await setBulkUserCompanyAccess(userEmails, grants);
+		return NextResponse.json({ updatedUsers });
 	}
 
 	return NextResponse.json({ error: "Unsupported action." }, { status: 400 });

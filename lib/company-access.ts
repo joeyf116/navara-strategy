@@ -351,6 +351,26 @@ export async function createCompany(companyIdRaw: string): Promise<string> {
 	return companyId;
 }
 
+export async function createCompanyAndAssignUsers(
+	companyIdRaw: string,
+	userEmailsRaw: string[],
+): Promise<{ companyId: string; assignedUsers: string[] }> {
+	const companyId = await createCompany(companyIdRaw);
+	const userEmails = [
+		...new Set(userEmailsRaw.map(normalizeEmail).filter(Boolean)),
+	];
+
+	for (const userEmail of userEmails) {
+		const current = await getUserCompanyAccessForAdmin(userEmail);
+		await setUserCompanyAccess(userEmail, [
+			...current.grants,
+			{ companyId, canWrite: true },
+		]);
+	}
+
+	return { companyId, assignedUsers: userEmails };
+}
+
 export async function setUserCompanyAccess(
 	userEmailRaw: string,
 	grantsRaw: CompanyGrant[],
@@ -370,6 +390,24 @@ export async function setUserCompanyAccess(
 	});
 
 	return grants;
+}
+
+export async function setBulkUserCompanyAccess(
+	userEmailsRaw: string[],
+	grantsRaw: CompanyGrant[],
+): Promise<Array<{ userEmail: string; grants: CompanyGrant[] }>> {
+	const userEmails = [
+		...new Set(userEmailsRaw.map(normalizeEmail).filter(Boolean)),
+	];
+	const grants = mergeGrants(grantsRaw);
+
+	const results: Array<{ userEmail: string; grants: CompanyGrant[] }> = [];
+	for (const userEmail of userEmails) {
+		const updated = await setUserCompanyAccess(userEmail, grants);
+		results.push({ userEmail, grants: updated });
+	}
+
+	return results;
 }
 
 export async function resolveUserCompanyAccess(

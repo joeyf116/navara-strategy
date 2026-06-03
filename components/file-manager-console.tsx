@@ -298,7 +298,7 @@ export function FileManagerConsole() {
 								<TableHead>Owner</TableHead>
 								<TableHead>Modified</TableHead>
 								<TableHead>Size</TableHead>
-								<TableHead className="w-[60px]" />
+								<TableHead className="w-15" />
 							</TableRow>
 						</TableHeader>
 						<TableBody>

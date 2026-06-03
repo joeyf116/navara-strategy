@@ -82,7 +82,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
-
+          terraform_wrapper: false
       - name: Terraform Init
         run: |
           terraform init -input=false \

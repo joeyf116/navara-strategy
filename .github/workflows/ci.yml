@@ -1,13 +1,14 @@
 name: CI
 
+# Runs on pull requests only.
+# Push to main is handled by deploy.yml which includes its own CI gate
+# before proceeding to build, push, and deploy.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
 
 jobs:
   lint:

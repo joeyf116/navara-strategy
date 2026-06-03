@@ -6,6 +6,11 @@ export const metadata: Metadata = {
 	title: "Navara Insights Portal",
 	description:
 		"Operational insights, platform health monitoring, and administrative management",
+	icons: {
+		icon: "/icon.svg",
+		shortcut: "/icon.svg",
+		apple: "/icon.svg",
+	},
 };
 
 export default function RootLayout({

@@ -114,6 +114,25 @@ resource "aws_cognito_user_pool" "this" {
     }
   }
 
+  # Maps the authenticated user to their company's S3 folder prefix.
+  # For EXISTING pools this attribute must be added via the AWS CLI because
+  # lifecycle.ignore_changes = [schema] prevents Terraform from modifying the schema:
+  #   aws cognito-idp add-custom-attributes \
+  #     --user-pool-id <POOL_ID> \
+  #     --custom-attributes Name=company_id,AttributeDataType=String,Mutable=true
+  schema {
+    name                     = "company_id"
+    attribute_data_type      = "String"
+    required                 = false
+    mutable                  = true
+    developer_only_attribute = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 128
+    }
+  }
+
   account_recovery_setting {
     recovery_mechanism {
       name     = "verified_email"
@@ -147,7 +166,15 @@ resource "aws_cognito_user_pool_domain" "this" {
   user_pool_id = aws_cognito_user_pool.this.id
 }
 
-# Separate app client used only by the SFTP auth Lambda (server-side, no secret needed).
+# Super_Admin group — members bypass company folder restrictions and get full bucket access.
+resource "aws_cognito_user_group" "super_admin" {
+  name         = "Super_Admin"
+  user_pool_id = aws_cognito_user_pool.this.id
+  description  = "Full read/write access to all company folders in S3"
+  precedence   = 0
+}
+
+# Separate app client used only by the SFTP auth Lambda(server-side, no secret needed).
 # Uses ADMIN_USER_PASSWORD_AUTH so the Lambda can validate credentials on behalf of the user.
 resource "aws_cognito_user_pool_client" "sftp_auth" {
   name         = "${var.project_name}-sftp-auth"
@@ -412,22 +439,80 @@ resource "aws_iam_role_policy" "transfer_user" {
   name = "${var.project_name}-transfer-user-policy"
   role = aws_iam_role.transfer_user.id
 
+  # This is the MAXIMUM permission ceiling for authenticated company users.
+  # The sftp_auth Lambda narrows access further via a per-request session policy
+  # that restricts each user to only their own company's folder prefix.
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid      = "ListBucket"
         Effect   = "Allow"
         Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.transfer.arn
       },
       {
+        Sid    = "CompanyObjectAccess"
         Effect = "Allow"
         Action = [
           "s3:GetObject",
           "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:DeleteObject",
+          "s3:GetObjectVersion",
+          "s3:DeleteObjectVersion",
         ]
-        Resource = "${aws_s3_bucket.transfer.arn}/clients/*"
+        Resource = "${aws_s3_bucket.transfer.arn}/*"
+      }
+    ]
+  })
+}
+
+# Super Admin IAM role — returned by the auth Lambda for members of the Super_Admin
+# Cognito group.  No session-policy restriction is applied; they get full bucket access.
+resource "aws_iam_role" "transfer_super_admin" {
+  name = "${var.project_name}-transfer-super-admin"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "transfer.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "transfer_super_admin" {
+  name = "${var.project_name}-transfer-super-admin-policy"
+  role = aws_iam_role.transfer_super_admin.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ListBucket"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:GetBucketLocation"]
+        Resource = aws_s3_bucket.transfer.arn
+      },
+      {
+        Sid    = "FullObjectAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:GetObjectVersion",
+          "s3:DeleteObjectVersion",
+          "s3:RestoreObject",
+        ]
+        Resource = "${aws_s3_bucket.transfer.arn}/*"
       }
     ]
   })
@@ -471,6 +556,7 @@ resource "aws_iam_role_policy" "sftp_auth_lambda" {
         Action = [
           "cognito-idp:AdminInitiateAuth",
           "cognito-idp:AdminGetUser",
+          "cognito-idp:AdminListGroupsForUser",
         ]
         Resource = aws_cognito_user_pool.this.arn
       }
@@ -496,10 +582,11 @@ resource "aws_lambda_function" "sftp_auth" {
 
   environment {
     variables = {
-      COGNITO_USER_POOL_ID   = aws_cognito_user_pool.this.id
-      COGNITO_CLIENT_ID      = aws_cognito_user_pool_client.sftp_auth.id
-      TRANSFER_USER_ROLE_ARN = aws_iam_role.transfer_user.arn
-      S3_BUCKET              = aws_s3_bucket.transfer.bucket
+      COGNITO_USER_POOL_ID    = aws_cognito_user_pool.this.id
+      COGNITO_CLIENT_ID       = aws_cognito_user_pool_client.sftp_auth.id
+      TRANSFER_USER_ROLE_ARN  = aws_iam_role.transfer_user.arn
+      SUPER_ADMIN_ROLE_ARN    = aws_iam_role.transfer_super_admin.arn
+      S3_BUCKET               = aws_s3_bucket.transfer.bucket
     }
   }
 

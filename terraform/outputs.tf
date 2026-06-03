@@ -62,3 +62,18 @@ output "cognito_user_pool_id" {
   value       = aws_cognito_user_pool.this.id
   description = "Cognito User Pool ID — used when creating/deleting web portal users via CLI"
 }
+
+output "super_admin_role_arn" {
+  value       = aws_iam_role.transfer_super_admin.arn
+  description = "IAM role ARN returned by the SFTP auth Lambda for Super_Admin group members"
+}
+
+output "company_user_role_arn" {
+  value       = aws_iam_role.transfer_user.arn
+  description = "IAM role ARN returned by the SFTP auth Lambda for regular company users (scoped further by session policy)"
+}
+
+output "sftp_mount_instructions" {
+  value       = "Windows (WebDAV): Map network drive to ${aws_cloudfront_distribution.web.domain_name}/api/dav | Windows (SSHFS-Win): \\\\sshfs\\<email>@${aws_transfer_server.this.endpoint}!22 | macOS: Finder ⌘K → https://${aws_cloudfront_distribution.web.domain_name}/api/dav"
+  description = "Quick-reference mount strings for Windows File Explorer and macOS Finder"
+}

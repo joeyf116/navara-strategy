@@ -18,31 +18,6 @@ output "cloudfront_domain_name" {
   description = "CloudFront distribution domain"
 }
 
-output "database_endpoint" {
-  value       = aws_db_instance.this.address
-  description = "RDS hostname"
-}
-
-output "database_port" {
-  value       = aws_db_instance.this.port
-  description = "RDS port"
-}
-
-output "database_name" {
-  value       = var.database_name
-  description = "RDS database name"
-}
-
-output "database_username" {
-  value       = var.database_username
-  description = "RDS username"
-}
-
-output "database_url_secret_arn" {
-  value       = aws_secretsmanager_secret.database_url.arn
-  description = "Secrets Manager ARN containing DATABASE_URL for Lambda"
-}
-
 output "nextauth_secret_arn" {
   value       = aws_secretsmanager_secret.nextauth_secret.arn
   description = "Secrets Manager ARN containing NEXTAUTH_SECRET"
@@ -86,9 +61,4 @@ output "cloudwatch_log_group" {
 output "lambda_function_arn" {
   value       = aws_lambda_function.web.arn
   description = "Lambda function ARN"
-}
-
-output "db_migrate_codebuild_project" {
-  value       = aws_codebuild_project.db_migrate.name
-  description = "CodeBuild project name used for in-VPC Prisma migrations"
 }

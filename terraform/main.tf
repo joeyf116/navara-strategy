@@ -47,64 +47,11 @@ resource "aws_security_group" "app" {
   tags = local.common_tags
 }
 
-resource "aws_security_group" "rds" {
-  name        = "${var.project_name}-rds-sg"
-  description = "Allow PostgreSQL from app security group"
-  vpc_id      = data.aws_vpc.default.id
-
-  ingress {
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.app.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = local.common_tags
-}
-
 # -----------------------------------------------------------------------------
 # RDS PostgreSQL
 # -----------------------------------------------------------------------------
 
-resource "aws_db_subnet_group" "this" {
-  name       = "${var.project_name}-db-subnets"
-  subnet_ids = data.aws_subnets.default.ids
-
-  tags = local.common_tags
-}
-
-resource "random_password" "db" {
-  length  = 24
-  special = false
-}
-
-resource "aws_db_instance" "this" {
-  identifier                = "${var.project_name}-postgres"
-  allocated_storage         = 20
-  max_allocated_storage     = 100
-  db_name                   = var.database_name
-  engine                    = "postgres"
-  engine_version            = "16.14"
-  instance_class            = var.database_instance_class
-  username                  = var.database_username
-  password                  = random_password.db.result
-  db_subnet_group_name      = aws_db_subnet_group.this.name
-  vpc_security_group_ids    = [aws_security_group.rds.id]
-  publicly_accessible       = false
-  skip_final_snapshot       = var.rds_skip_final_snapshot
-  final_snapshot_identifier = var.rds_skip_final_snapshot ? null : "${var.project_name}-postgres-final"
-  deletion_protection       = var.rds_deletion_protection
-  storage_encrypted         = true
-
-  tags = local.common_tags
-}
+# (Removed - replaced by S3-backed storage)
 
 # -----------------------------------------------------------------------------
 # Cognito – authentication
@@ -184,17 +131,6 @@ resource "aws_cognito_user_pool_domain" "this" {
 # -----------------------------------------------------------------------------
 # Secrets Manager
 # -----------------------------------------------------------------------------
-
-resource "aws_secretsmanager_secret" "database_url" {
-  name = "${var.project_name}/database-url"
-
-  tags = local.common_tags
-}
-
-resource "aws_secretsmanager_secret_version" "database_url" {
-  secret_id     = aws_secretsmanager_secret.database_url.id
-  secret_string = "postgres://${var.database_username}:${random_password.db.result}@${aws_db_instance.this.address}:${aws_db_instance.this.port}/${var.database_name}"
-}
 
 resource "random_password" "nextauth_secret" {
   length  = 48
@@ -616,7 +552,6 @@ resource "aws_iam_role_policy" "lambda_app" {
           "secretsmanager:GetSecretValue"
         ]
         Resource = [
-          aws_secretsmanager_secret.database_url.arn,
           aws_secretsmanager_secret.nextauth_secret.arn,
           aws_secretsmanager_secret.cognito_client_id.arn,
           aws_secretsmanager_secret.cognito_client_secret.arn
@@ -665,8 +600,6 @@ resource "aws_lambda_function" "web" {
       AUTH_COGNITO_ISSUER = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
       AUTH_COGNITO_ID     = aws_cognito_user_pool_client.this.id
       AUTH_COGNITO_SECRET = aws_cognito_user_pool_client.this.client_secret
-      DATABASE_URL        = aws_secretsmanager_secret_version.database_url.secret_string
-      DATABASE_SSL_REJECT_UNAUTHORIZED = "false"
       NEXTAUTH_SECRET     = aws_secretsmanager_secret_version.nextauth_secret.secret_string
       NEXTAUTH_URL        = var.app_public_url
       AUTH_URL            = var.app_public_url
@@ -713,155 +646,6 @@ resource "aws_lambda_permission" "web_public_invoke" {
   action                 = "lambda:InvokeFunction"
   function_name          = aws_lambda_function.web.function_name
   principal              = "*"
-}
-
-# -----------------------------------------------------------------------------
-# Database migrations - CodeBuild runner in VPC
-# -----------------------------------------------------------------------------
-
-resource "aws_iam_role" "codebuild_migrate" {
-  name = "${var.project_name}-codebuild-migrate"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "codebuild.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = local.common_tags
-}
-
-resource "aws_iam_role_policy" "codebuild_migrate" {
-  name = "${var.project_name}-codebuild-migrate-policy"
-  role = aws_iam_role.codebuild_migrate.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "CloudWatchLogs"
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "VpcNetworking"
-        Effect = "Allow"
-        Action = [
-          "ec2:CreateNetworkInterface",
-          "ec2:CreateNetworkInterfacePermission",
-          "ec2:DeleteNetworkInterface",
-          "ec2:DescribeNetworkInterfaces",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeVpcs",
-          "ec2:DescribeDhcpOptions"
-        ]
-        Resource = "*"
-      },
-      {
-        Sid    = "DatabaseUrlSecretRead"
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = aws_secretsmanager_secret.database_url.arn
-      }
-    ]
-  })
-}
-
-resource "aws_codebuild_project" "db_migrate" {
-  name          = "${var.project_name}-db-migrate"
-  description   = "Run Prisma migrate deploy inside VPC"
-  service_role  = aws_iam_role.codebuild_migrate.arn
-  build_timeout = 30
-
-  source {
-    type      = "NO_SOURCE"
-    buildspec = <<-EOT
-      version: 0.2
-      phases:
-        install:
-          runtime-versions:
-            nodejs: 22
-        build:
-          commands:
-            - git clone --depth 1 "$REPO_URL" /tmp/navara-strategy
-            - cd /tmp/navara-strategy
-            - if [ -n "$REPO_SHA" ]; then git fetch --depth 1 origin "$REPO_SHA"; git checkout "$REPO_SHA"; fi
-            - export DATABASE_URL="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DATABASE_URL_SECRET_ID" --query SecretString --output text)?sslmode=require"
-            - npm ci
-            - |
-              set +e
-              MIGRATE_OUTPUT=$(npx prisma migrate deploy 2>&1)
-              MIGRATE_EXIT=$?
-              set -e
-              echo "$MIGRATE_OUTPUT"
-              if [ "$MIGRATE_EXIT" -ne 0 ] && echo "$MIGRATE_OUTPUT" | grep -q "P3005" && [ -n "$BASELINE_MIGRATION" ]; then
-                npx prisma migrate resolve --applied "$BASELINE_MIGRATION"
-                npx prisma migrate deploy
-              elif [ "$MIGRATE_EXIT" -ne 0 ]; then
-                exit "$MIGRATE_EXIT"
-              fi
-    EOT
-  }
-
-  artifacts {
-    type = "NO_ARTIFACTS"
-  }
-
-  environment {
-    compute_type                = "BUILD_GENERAL1_SMALL"
-    image                       = "aws/codebuild/standard:7.0"
-    type                        = "LINUX_CONTAINER"
-    image_pull_credentials_type = "CODEBUILD"
-    privileged_mode             = false
-
-    environment_variable {
-      name  = "AWS_REGION"
-      value = var.aws_region
-    }
-
-    environment_variable {
-      name  = "DATABASE_URL_SECRET_ID"
-      value = aws_secretsmanager_secret.database_url.name
-    }
-
-    environment_variable {
-      name  = "REPO_URL"
-      value = "https://github.com/${var.github_repository}.git"
-    }
-
-    environment_variable {
-      name  = "REPO_SHA"
-      value = ""
-    }
-
-    environment_variable {
-      name  = "BASELINE_MIGRATION"
-      value = "20260603_webdav_prisma"
-    }
-  }
-
-  vpc_config {
-    vpc_id             = data.aws_vpc.default.id
-    subnets            = aws_subnet.private[*].id
-    security_group_ids = [aws_security_group.app.id]
-  }
-
-  tags = local.common_tags
 }
 
 # -----------------------------------------------------------------------------

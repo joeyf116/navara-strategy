@@ -8,7 +8,6 @@ import {
 	S3Client,
 } from "@aws-sdk/client-s3";
 
-import { prisma } from "@/lib/prisma";
 import type { UserRole } from "@/lib/types";
 
 export type SharedFileSource =
@@ -54,8 +53,39 @@ function toStoragePath(storageKey: string) {
 	return filesBucketPrefix ? `${filesBucketPrefix}/${storageKey}` : storageKey;
 }
 
-function usingDatabase() {
-	return Boolean(process.env.DATABASE_URL);
+function s3MetaKey(): string {
+	const base = filesBucketPrefix ? `${filesBucketPrefix}/` : "";
+	return `${base}.metadata/shared-files-index.json`;
+}
+
+async function readS3Metadata(): Promise<SharedFile[]> {
+	if (!filesBucket || !s3Client) return [];
+	try {
+		const resp = await s3Client.send(
+			new GetObjectCommand({ Bucket: filesBucket, Key: s3MetaKey() }),
+		);
+		const buf = await readS3Body(resp.Body);
+		const parsed = JSON.parse(buf.toString("utf8")) as unknown;
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.map((r) => normalizeLocalRecord(r as Partial<SharedFile>))
+			.filter((r): r is SharedFile => r !== null);
+	} catch (err: unknown) {
+		if ((err as { name?: string }).name === "NoSuchKey") return [];
+		throw err;
+	}
+}
+
+async function writeS3Metadata(records: SharedFile[]): Promise<void> {
+	if (!filesBucket || !s3Client) return;
+	await s3Client.send(
+		new PutObjectCommand({
+			Bucket: filesBucket,
+			Key: s3MetaKey(),
+			Body: JSON.stringify(records),
+			ContentType: "application/json",
+		}),
+	);
 }
 
 function normalizeLocalRecord(record: Partial<SharedFile>): SharedFile | null {
@@ -129,33 +159,6 @@ function isVisibleToViewer(
 	);
 }
 
-function mapSharedFileRow(row: {
-	id: string;
-	originalName: string;
-	storageKey: string;
-	sizeBytes: bigint;
-	uploadedBy: string;
-	uploadedByEmail: string;
-	ownerEmail: string;
-	source: string;
-	uploadedAt: Date;
-}): SharedFile {
-	return {
-		id: row.id,
-		original_name: row.originalName,
-		storage_key: row.storageKey,
-		size_bytes: Number(row.sizeBytes),
-		uploaded_by: row.uploadedBy,
-		uploaded_by_email: row.uploadedByEmail,
-		owner_email: row.ownerEmail,
-		source:
-			row.source === "admin_share" || row.source === "system_generated"
-				? row.source
-				: "user_upload",
-		uploaded_at: row.uploadedAt.toISOString(),
-	};
-}
-
 function isAsyncIterable(value: unknown): value is AsyncIterable<Uint8Array> {
 	return Boolean(
 		value &&
@@ -200,28 +203,14 @@ export async function listSharedFiles(params: {
 	viewerRole: UserRole;
 }) {
 	const viewerEmail = normalizeEmail(params.viewerEmail);
-
-	if (!usingDatabase()) {
-		const records = await readLocalMetadata();
-		return sortByUploadDateDesc(
-			records.filter((file) =>
-				isVisibleToViewer(file, viewerEmail, params.viewerRole),
-			),
-		);
-	}
-
-	const where = canManage(params.viewerRole)
-		? {}
-		: {
-				OR: [{ ownerEmail: viewerEmail }, { uploadedByEmail: viewerEmail }],
-			};
-
-	const rows = await prisma.sharedFile.findMany({
-		where,
-		orderBy: { uploadedAt: "desc" },
-	});
-
-	return rows.map((row) => mapSharedFileRow(row));
+	const records = filesBucket
+		? await readS3Metadata()
+		: await readLocalMetadata();
+	return sortByUploadDateDesc(
+		records.filter((file) =>
+			isVisibleToViewer(file, viewerEmail, params.viewerRole),
+		),
+	);
 }
 
 export async function getSharedFileForViewer(params: {
@@ -230,32 +219,14 @@ export async function getSharedFileForViewer(params: {
 	viewerRole: UserRole;
 }) {
 	const viewerEmail = normalizeEmail(params.viewerEmail);
-
-	if (!usingDatabase()) {
-		const records = await readLocalMetadata();
-		const record = records.find((item) => item.id === params.id);
-
-		if (!record || !isVisibleToViewer(record, viewerEmail, params.viewerRole)) {
-			return null;
-		}
-
-		return record;
-	}
-
-	const row = await prisma.sharedFile.findUnique({
-		where: { id: params.id },
-	});
-
-	if (!row) {
+	const records = filesBucket
+		? await readS3Metadata()
+		: await readLocalMetadata();
+	const record = records.find((item) => item.id === params.id);
+	if (!record || !isVisibleToViewer(record, viewerEmail, params.viewerRole)) {
 		return null;
 	}
-
-	const mapped = mapSharedFileRow(row);
-	if (!isVisibleToViewer(mapped, viewerEmail, params.viewerRole)) {
-		return null;
-	}
-
-	return mapped;
+	return record;
 }
 
 export async function createSharedFile(params: {
@@ -301,27 +272,16 @@ export async function createSharedFile(params: {
 		uploaded_at: new Date().toISOString(),
 	};
 
-	if (!usingDatabase()) {
+	if (filesBucket) {
+		const current = await readS3Metadata();
+		current.unshift(record);
+		await writeS3Metadata(current);
+	} else {
 		const current = await readLocalMetadata();
 		current.unshift(record);
 		await writeLocalMetadata(current);
-		return record;
 	}
-
-	const created = await prisma.sharedFile.create({
-		data: {
-			id: record.id,
-			originalName: record.original_name,
-			storageKey: record.storage_key,
-			sizeBytes: BigInt(record.size_bytes),
-			uploadedBy: record.uploaded_by,
-			uploadedByEmail: record.uploaded_by_email,
-			ownerEmail: record.owner_email,
-			source: record.source,
-		},
-	});
-
-	return mapSharedFileRow(created);
+	return record;
 }
 
 export async function downloadSharedFileContent(file: SharedFile) {

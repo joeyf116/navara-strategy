@@ -16,38 +16,6 @@ variable "environment" {
   default     = "production"
 }
 
-# ---------- RDS ----------
-
-variable "database_name" {
-  description = "PostgreSQL database name"
-  type        = string
-  default     = "navara"
-}
-
-variable "database_username" {
-  description = "PostgreSQL admin username"
-  type        = string
-  default     = "navara_admin"
-}
-
-variable "database_instance_class" {
-  description = "RDS instance class"
-  type        = string
-  default     = "db.t4g.micro"
-}
-
-variable "rds_deletion_protection" {
-  description = "Whether RDS deletion protection is enabled"
-  type        = bool
-  default     = true
-}
-
-variable "rds_skip_final_snapshot" {
-  description = "Skip RDS final snapshot on destroy"
-  type        = bool
-  default     = false
-}
-
 # ---------- S3 ----------
 
 variable "s3_force_destroy" {

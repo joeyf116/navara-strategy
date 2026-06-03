@@ -3,6 +3,11 @@ output "app_url" {
   description = "Public CloudFront URL for the Next.js web app"
 }
 
+output "webdav_endpoint" {
+  value       = "https://${aws_cloudfront_distribution.web.domain_name}/api/dav"
+  description = "WebDAV endpoint for mapping network drives"
+}
+
 output "lambda_url" {
   value       = aws_lambda_function_url.web.function_url
   description = "Lambda Function URL origin"

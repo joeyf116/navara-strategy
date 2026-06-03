@@ -334,6 +334,18 @@ resource "aws_s3_bucket_versioning" "transfer" {
   }
 }
 
+resource "aws_s3_bucket_cors_configuration" "transfer" {
+  bucket = aws_s3_bucket.transfer.id
+
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
+    allowed_origins = var.web_cors_allowed_origins
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3600
+  }
+}
+
 # -----------------------------------------------------------------------------
 # AWS Transfer Family (SFTP)
 # -----------------------------------------------------------------------------

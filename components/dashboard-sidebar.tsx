@@ -3,7 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { Upload, Moon, Sun, LogOut, Menu, X } from "lucide-react";
+import {
+	Upload,
+	Moon,
+	Sun,
+	LogOut,
+	Menu,
+	X,
+	FolderTree,
+	Settings,
+} from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -14,7 +23,11 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const navigation = [{ name: "File Portal", href: "/uploads", icon: Upload }];
+const navigation = [
+	{ name: "Files", href: "/files", icon: FolderTree },
+	{ name: "Uploads", href: "/uploads", icon: Upload },
+	{ name: "Settings", href: "/settings", icon: Settings },
+];
 
 function roleBadgeLabel(role: string | undefined): string {
 	switch (role) {

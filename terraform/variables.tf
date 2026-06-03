@@ -73,9 +73,15 @@ variable "ecr_max_image_count" {
 # ---------- File Portal ----------
 
 variable "files_bucket_prefix" {
-  description = "S3 key prefix used by the file portal for uploaded and shared files"
+  description = "S3 key prefix used by the web and WebDAV file portal; user content is stored under uploads/{user_email}/"
   type        = string
-  default     = "portal-files"
+  default     = "uploads"
+}
+
+variable "web_cors_allowed_origins" {
+  description = "Origins allowed to call S3 directly for file uploads/downloads"
+  type        = list(string)
+  default     = ["*"]
 }
 
 # ---------- Web App (Lambda) ----------

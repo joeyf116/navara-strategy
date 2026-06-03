@@ -11,22 +11,37 @@ rds_skip_final_snapshot = false
 
 # S3
 s3_force_destroy        = false
+web_cors_allowed_origins = ["https://your-domain.com", "http://localhost:3000"]
 
 # ECR
 ecr_force_delete        = false
 ecr_max_image_count     = 30
 
-# App Runner
+# Lambda Web App
 app_image_identifier    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:latest"
-apprunner_cpu           = "256"
-apprunner_memory        = "512"
-apprunner_max_concurrency = 100
-apprunner_max_size      = 3
-apprunner_min_size      = 1
+lambda_memory_size      = 1024
+lambda_timeout          = 30
+lambda_architecture     = "x86_64"
+cloudfront_price_class  = "PriceClass_100"
+app_public_url          = "https://d2i0sz4mcgor37.cloudfront.net"
+
+# File portal behavior
+files_bucket_prefix     = "uploads"
 
 # Transfer Family (SFTP)
 transfer_user_name      = "client-upload"
 transfer_user_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+
+# Cognito
+cognito_domain          = "navara-sftp-911788523695"
+cognito_callback_urls   = [
+	"https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito",
+	"http://localhost:3000/api/auth/callback/cognito"
+]
+cognito_logout_urls     = [
+	"https://d2i0sz4mcgor37.cloudfront.net/login",
+	"http://localhost:3000/login"
+]
 
 # Observability
 log_retention_days      = 30

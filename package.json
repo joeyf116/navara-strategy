@@ -7,11 +7,14 @@
 		"dev:clean": "if exist .next rd /s /q .next && next dev --turbopack",
 		"build": "next build",
 		"start": "next start",
-		"lint": "eslint"
+		"lint": "eslint",
+		"prisma:generate": "prisma generate",
+		"prisma:migrate": "prisma migrate deploy"
 	},
 	"dependencies": {
 		"@auth/core": "^0.41.2",
 		"@aws-sdk/client-s3": "^3.1056.0",
+		"@prisma/client": "^7.8.0",
 		"@radix-ui/react-avatar": "^1.1.11",
 		"@radix-ui/react-dialog": "^1.1.15",
 		"@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -30,6 +33,7 @@
 		"next": "16.2.6",
 		"next-auth": "^5.0.0-beta.31",
 		"pg": "^8.21.0",
+		"prisma": "^7.8.0",
 		"react": "19.2.4",
 		"react-dom": "19.2.4",
 		"recharts": "^3.8.1",

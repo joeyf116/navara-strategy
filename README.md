@@ -2,166 +2,164 @@
 
 Secure file sharing portal built with Next.js and deployed to AWS Lambda (container image) behind CloudFront.
 
-## Current Architecture
+## App Architecture (Current)
 
 ```mermaid
 flowchart LR
-    User[Browser] --> CF[CloudFront]
-    CF --> LURL[Lambda Function URL]
-    LURL --> L[Next.js 16 App on Lambda]
+    U[User Browser] --> CF[CloudFront]
+    CF --> LFU[Lambda Function URL]
+    LFU --> APP[Next.js 16 App on Lambda]
 
-    L --> COG[Cognito]
-    L --> SM[Secrets Manager]
-    L --> RDS[(RDS PostgreSQL)]
-    L --> S3[(S3 Files Bucket)]
+    APP --> COG[Cognito via NextAuth]
+    APP --> RDS[(RDS PostgreSQL)]
+    APP --> S3[(S3 Bucket)]
+    APP --> TF[AWS Transfer Family]
 
-    subgraph VPC
-      PSN[Private Subnets]
-      NAT[NAT Gateway]
-      RDS
+    subgraph Data
+      VF[virtual_files]
+      FS[file_shares]
+      AP[app_passwords]
+      WL[webdav_locks]
     end
 
-    L --> PSN
-    PSN --> NAT
+    APP --> VF
+    APP --> FS
+    APP --> AP
+    APP --> WL
 ```
 
-Production URL: https://d2i0sz4mcgor37.cloudfront.net
+Production URL: <https://d2i0sz4mcgor37.cloudfront.net>
 
-## Portal Behavior
+### Runtime Components
 
-- Login-first experience.
-- Main app route redirects to file portal.
-- File portal route: /uploads
-- Upload/list API: GET /api/files, POST /api/files
-- Download API: GET /api/files/:id/download
+- UI routes are in [app](app), with authenticated dashboard routes under [app/(dashboard)](<app/(dashboard)>).
+- Root dashboard route redirects to `/uploads` in [app/(dashboard)/page.tsx](<app/(dashboard)/page.tsx>).
+- Session/auth is handled by NextAuth in [lib/auth.ts](lib/auth.ts) with Cognito in production and optional dev credentials locally.
+- File APIs:
+  - Legacy shared files: [app/api/files/route.ts](app/api/files/route.ts)
+  - Virtual file tree: [app/api/files/tree/route.ts](app/api/files/tree/route.ts)
+  - Tree download: [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts)
+  - WebDAV endpoint: [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)
+  - App passwords API: [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)
+- Data access uses Prisma models in [prisma/schema.prisma](prisma/schema.prisma) and migrations in [prisma/migrations](prisma/migrations).
 
-Role behavior:
+### RBAC Model
 
-- Admin or super_admin: sees all files and can share to target users.
-- tenant_user/read_only_auditor: sees own uploads and files shared to them.
+- Supported roles: `super_admin`, `admin`, `tenant_user`, `read_only_auditor`.
+- Cognito groups are mapped to roles in [lib/auth.ts](lib/auth.ts).
+- Unmapped Cognito users default to `tenant_user` for least-privilege behavior.
 
-## Authentication and Role Prerequisites
+## Deploy Now (GitHub Actions)
 
-Auth stack:
+Main deployment workflow: [.github/workflows/deploy.yml](.github/workflows/deploy.yml)
 
-- Production: NextAuth + AWS Cognito provider.
-- Local dev: optional dev credentials provider when NEXT_PUBLIC_DEV_MODE=true.
+What it does:
 
-Important current production role note:
+1. CI gate (`lint`, `tsc`, `build`).
+2. Terraform bootstrap for ECR (first-time and idempotent).
+3. Build and push Lambda image to ECR.
+4. Terraform plan/apply for infrastructure and app image update.
+5. Prisma migrations (`prisma migrate deploy`) using DATABASE_URL from AWS Secrets Manager.
 
-- OAuth users are mapped from Cognito groups in [lib/auth.ts](lib/auth.ts).
-- Supported group names are `super_admin`, `admin`, `tenant_user`, and `read_only_auditor`.
-- Any Cognito user without a mapped group defaults to `tenant_user`.
+### Required Repository Secrets
 
-Prerequisites to log in as Admin (production):
+- `AWS_DEPLOY_ROLE_ARN`
+  - IAM role ARN used by OIDC in GitHub Actions.
+- `SFTP_USER_PUBLIC_KEY`
+  - Public SSH key for the AWS Transfer Family user provisioned by Terraform.
 
-1. Cognito User Pool and app client are deployed by Terraform.
-2. User exists in Cognito and has a confirmed password.
-3. Callback/logout URLs include:
+### Required Repository Variables
 
-- https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito
-- https://d2i0sz4mcgor37.cloudfront.net/login
+- `AWS_REGION`
+  - Example: `us-east-1`
+- `ECR_REPOSITORY`
+  - Example: `navara-sftp`
+- `TF_STATE_BUCKET`
+  - Terraform backend bucket name.
+- `TF_STATE_KEY`
+  - Example: `production/terraform.tfstate`
+- `TF_LOCK_TABLE`
+  - DynamoDB lock table for Terraform state.
+- `COGNITO_DOMAIN`
+  - Cognito hosted UI domain prefix.
+- `APP_PUBLIC_URL`
+  - Public app URL (CloudFront), used for Auth.js URLs.
+- `COGNITO_CALLBACK_URLS`
+  - JSON list string, for example:
+    `[
+  "https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito",
+  "http://localhost:3000/api/auth/callback/cognito"
+]`
+- `COGNITO_LOGOUT_URLS`
+  - JSON list string, for example:
+    `[
+  "https://d2i0sz4mcgor37.cloudfront.net/login",
+  "http://localhost:3000/login"
+]`
 
-Prerequisites to log in as User (tenant_user):
+### Optional Repository Variable
 
-1. For local testing: set NEXT_PUBLIC_DEV_MODE=true and use the demo user credentials in [lib/auth.ts](lib/auth.ts).
-2. For production tenant role: add Cognito claim/group-to-role mapping in [lib/auth.ts](lib/auth.ts), then create a Cognito user assigned to that mapped role.
+- `DATABASE_URL_SECRET_ID`
+  - Secrets Manager secret ID that stores `DATABASE_URL` for migration job.
+  - Default in workflow: `navara-sftp/database-url`.
+  - Set this variable if you use a different secret name.
 
-## Deploy Latest from Workstation (AWS CLI)
+### Current Values To Set In GitHub
 
-Prerequisites:
+Use these values with your current production configuration:
 
-- AWS CLI v2
-- Docker
-- Terraform (tested with 1.6+)
-- AWS profile configured (example used here: joey-navara)
+- `AWS_REGION=us-east-1`
+- `ECR_REPOSITORY=navara-sftp`
+- `TF_STATE_BUCKET=navara-sftp-terraform-state`
+- `TF_STATE_KEY=production/terraform.tfstate`
+- `TF_LOCK_TABLE=navara-sftp-terraform-locks`
+- `COGNITO_DOMAIN=navara-sftp-911788523695`
+- `APP_PUBLIC_URL=https://d2i0sz4mcgor37.cloudfront.net`
+- `COGNITO_CALLBACK_URLS=["https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]`
+- `COGNITO_LOGOUT_URLS=["https://d2i0sz4mcgor37.cloudfront.net/login","http://localhost:3000/login"]`
+- `DATABASE_URL_SECRET_ID=navara-sftp/database-url` (optional but recommended)
 
-1. Build and push a new Lambda image:
+Set these repository secrets:
+
+- `AWS_DEPLOY_ROLE_ARN=<your-github-oidc-deploy-role-arn>`
+- `SFTP_USER_PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwGGCfbU7p8aNMsmkANy57L3qCNbt1vWlJUfJys1o/r navara-sftp-client`
+
+### tfvars To GitHub Mapping
+
+- `aws_region` -> `AWS_REGION`
+- `project_name` -> `ECR_REPOSITORY`
+- `cognito_domain` -> `COGNITO_DOMAIN`
+- `app_public_url` -> `APP_PUBLIC_URL`
+- `cognito_callback_urls` -> `COGNITO_CALLBACK_URLS`
+- `cognito_logout_urls` -> `COGNITO_LOGOUT_URLS`
+- `transfer_user_public_key` -> `SFTP_USER_PUBLIC_KEY` (GitHub secret)
+
+## Deploy from Workstation (Manual)
+
+If you need manual fallback deployment:
+
+1. Build and push image from [Dockerfile.lambda](Dockerfile.lambda).
+2. Set `app_image_identifier` in [terraform/terraform.tfvars](terraform/terraform.tfvars).
+3. Run `terraform apply` in [terraform](terraform).
+4. Run Prisma migrations against production DB:
 
 ```powershell
-$account = (aws sts get-caller-identity --profile joey-navara --query Account --output text).Trim()
-$region = "us-east-1"
-$repo = "$account.dkr.ecr.$region.amazonaws.com/navara-sftp"
-$tag = "lambda-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-
-aws ecr get-login-password --region $region --profile joey-navara |
-  docker login --username AWS --password-stdin "$account.dkr.ecr.$region.amazonaws.com"
-
-docker build -f Dockerfile.lambda -t "$repo`:$tag" .
-docker push "$repo`:$tag"
+$env:DATABASE_URL = (aws secretsmanager get-secret-value `
+  --secret-id "navara-sftp/database-url" `
+  --query SecretString --output text)
+npx prisma migrate deploy
 ```
-
-2. Set image in [terraform/terraform.tfvars](terraform/terraform.tfvars):
-
-```hcl
-app_image_identifier = "<account>.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:lambda-<timestamp>"
-```
-
-3. Terraform init/apply non-interactively:
-
-```powershell
-$tf = "C:\Users\<you>\AppData\Local\Microsoft\WinGet\Packages\Hashicorp.Terraform_Microsoft.Winget.Source_8wekyb3d8bbwe\terraform.exe"
-$env:AWS_PROFILE = "joey-navara"
-
-& $tf -chdir=terraform init -reconfigure \
-  -backend-config="bucket=navara-sftp-terraform-state" \
-  -backend-config="key=production/terraform.tfstate" \
-  -backend-config="region=us-east-1" \
-  -backend-config="dynamodb_table=navara-sftp-terraform-locks"
-
-& $tf -chdir=terraform apply -auto-approve -var-file=terraform.tfvars
-```
-
-If Terraform cannot read profile credentials in your terminal session:
-
-```powershell
-$lines = aws configure export-credentials --profile joey-navara --format powershell
-Invoke-Expression ($lines -join "`n")
-```
-
-Then re-run apply.
-
-## Login Steps
-
-Admin login (production):
-
-1. Open https://d2i0sz4mcgor37.cloudfront.net/login
-2. Click Sign in with Cognito.
-3. Authenticate with a Cognito user.
-4. You land on /uploads and can view/share files across users.
-
-User login (local dev path):
-
-1. Set NEXT_PUBLIC_DEV_MODE=true in .env.local.
-2. Start app with npm run dev.
-3. Open /login and use a demo tenant user from [lib/auth.ts](lib/auth.ts), such as tenant@acme.com / demo.
-4. You land on /uploads and only see own uploads + admin-shared files.
-
-## GitHub Actions Deployment Configuration
-
-GitHub repository secrets required by [deploy.yml](.github/workflows/deploy.yml):
-
-- `AWS_DEPLOY_ROLE_ARN`: `arn:aws:iam::911788523695:role/navara-github-deploy`
-- `SFTP_USER_PUBLIC_KEY`: the public SSH key string for the Transfer Family user
-
-GitHub repository variables required by [deploy.yml](.github/workflows/deploy.yml):
-
-- `AWS_REGION`: `us-east-1`
-- `ECR_REPOSITORY`: `navara-sftp`
-- `TF_STATE_BUCKET`: `navara-sftp-terraform-state`
-- `TF_STATE_KEY`: `production/terraform.tfstate`
-- `TF_LOCK_TABLE`: `navara-sftp-terraform-locks`
-- `COGNITO_DOMAIN`: `navara-sftp-911788523695`
-- `APP_PUBLIC_URL`: `https://d2i0sz4mcgor37.cloudfront.net`
-- `COGNITO_CALLBACK_URLS`: `["https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]`
-- `COGNITO_LOGOUT_URLS`: `["https://d2i0sz4mcgor37.cloudfront.net/login","http://localhost:3000/login"]`
 
 ## Project Paths
 
-- App shell and portal routes: [app](app)
+- App routes: [app](app)
+- Dashboard files UI: [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)
+- Dashboard uploads UI: [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)
+- Dashboard settings UI: [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>)
 - Login page: [app/login/page.tsx](app/login/page.tsx)
-- File portal UI: [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)
-- File APIs: [app/api/files/route.ts](app/api/files/route.ts), [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)
-- Role/file access rules: [lib/files.ts](lib/files.ts)
-- Auth configuration: [lib/auth.ts](lib/auth.ts)
-- Terraform infra: [terraform/main.tf](terraform/main.tf), [terraform/variables.tf](terraform/variables.tf), [terraform/outputs.tf](terraform/outputs.tf), [terraform/terraform.tfvars](terraform/terraform.tfvars)
+- Auth config: [lib/auth.ts](lib/auth.ts)
+- File access rules: [lib/files.ts](lib/files.ts)
+- Virtual file system logic: [lib/virtual-files.ts](lib/virtual-files.ts)
+- App passwords: [lib/app-passwords.ts](lib/app-passwords.ts)
+- WebDAV locks: [lib/webdav-locks.ts](lib/webdav-locks.ts)
+- Terraform infra: [terraform/main.tf](terraform/main.tf)

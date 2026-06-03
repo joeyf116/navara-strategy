@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum VirtualNodeKind {
+  file
+  folder
+}
+
+enum SharedFileSource {
+  user_upload
+  admin_share
+  system_generated
+}
+
+model SharedFile {
+  id              String           @id @db.Uuid
+  originalName    String           @map("original_name")
+  storageKey      String           @map("storage_key")
+  sizeBytes       BigInt           @map("size_bytes")
+  uploadedBy      String           @map("uploaded_by")
+  uploadedByEmail String           @map("uploaded_by_email")
+  ownerEmail      String           @map("owner_email")
+  source          SharedFileSource @default(user_upload)
+  uploadedAt      DateTime         @default(now()) @map("uploaded_at")
+
+  @@index([ownerEmail])
+  @@index([uploadedByEmail])
+  @@map("shared_files")
+}
+
+model VirtualFile {
+  id          String          @id @db.Uuid
+  ownerEmail  String          @map("owner_email")
+  parentId    String?         @db.Uuid @map("parent_id")
+  parent      VirtualFile?    @relation("VirtualFileChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children    VirtualFile[]   @relation("VirtualFileChildren")
+  name        String
+  kind        VirtualNodeKind
+  storageKey  String?         @map("storage_key")
+  sizeBytes   BigInt          @default(0) @map("size_bytes")
+  contentType String?         @map("content_type")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  shares      FileShare[]
+
+  @@index([ownerEmail, parentId])
+  @@map("virtual_files")
+}
+
+model FileShare {
+  id          String      @id @db.Uuid
+  nodeId      String      @db.Uuid @map("node_id")
+  ownerEmail  String      @map("owner_email")
+  granteeEmail String     @map("grantee_email")
+  canWrite    Boolean     @default(false) @map("can_write")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  node        VirtualFile @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([nodeId, granteeEmail])
+  @@index([granteeEmail])
+  @@map("file_shares")
+}
+
+model AppPassword {
+  id          String    @id @db.Uuid
+  userEmail   String    @map("user_email")
+  label       String
+  tokenPrefix String    @map("token_prefix")
+  tokenHash   String    @map("token_hash")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  @@index([userEmail])
+  @@index([tokenPrefix])
+  @@map("app_passwords")
+}
+
+model WebDavLock {
+  id         String    @id @db.Uuid
+  userEmail  String    @map("user_email")
+  lockPath   String    @map("lock_path")
+  depth      String
+  owner      String?
+  token      String    @unique
+  timeoutSec Int       @map("timeout_sec")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@index([lockPath, expiresAt])
+  @@index([userEmail, expiresAt])
+  @@map("webdav_locks")
+}

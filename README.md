@@ -185,150 +185,525 @@ No database migration step is needed.
 
 ---
 
-## Managing Clients (SFTP + Web Portal)
+## Multi-Tenant SFTP Architecture
 
-Clients use **one set of credentials** for everything:
+### Overview
 
-| Access method | Username | Password/Key          |
-| ------------- | -------- | --------------------- |
-| Web portal    | Email    | Cognito password      |
-| SFTP          | Email    | Same Cognito password |
-
-A small Lambda (`terraform/sftp-auth/index.mjs`) sits between Transfer Family and Cognito. When a client connects via SFTP, Transfer Family calls the Lambda, which validates the password against Cognito and returns the correct S3 home directory. No SSH keys, no separate SFTP user accounts to maintain.
-
-Each client's files live at:
+Every company gets a private, isolated folder in a single shared S3 bucket. Users authenticate with a Cognito email/password — the same credential works for the web portal **and** SFTP. No SSH keys, no per-tenant AWS accounts, no separate Transfer Family users.
 
 ```
-s3://{bucket}/clients/{sanitized-email}/
-# e.g. client@acme.com → clients/client-acme-com/
+┌──────────────────────────────────────────────────────────────────────┐
+│                          End User                                    │
+│  Windows / macOS  ──  File Explorer / Finder (WebDAV or SFTP)       │
+└──────────────────────────────┬───────────────────────────────────────┘
+                               │ SFTP :22  (or WebDAV HTTPS)
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│              AWS Transfer Family (SFTP, PUBLIC endpoint)             │
+│                     Custom Identity Provider                         │
+└──────────────────────────────┬───────────────────────────────────────┘
+                               │ Lambda:InvokeFunction
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│          SFTP Auth Lambda  (terraform/sftp-auth/index.mjs)           │
+│                                                                      │
+│  1. AdminInitiateAuth   ──► Cognito User Pool                        │
+│  2. AdminGetUser        ──► read custom:company_id                   │
+│  3. AdminListGroups     ──► check Super_Admin membership             │
+│                                                                      │
+│  Super_Admin → HomeDirectoryType: PATH  → s3://bucket/              │
+│  Company user → HomeDirectoryType: LOGICAL → s3://bucket/{co_id}/   │
+│               + session policy restricting to that prefix only       │
+└──────────────────────────────┬───────────────────────────────────────┘
+                               │ IAM AssumeRole + session policy
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                    S3 Bucket  (single shared)                        │
+│                                                                      │
+│   {Company_A}/To_Navara/        {Company_B}/To_Navara/               │
+│   {Company_A}/From_Navara/      {Company_B}/From_Navara/             │
+│                                                                      │
+│  Company_A users see ONLY Company_A/ (logical chroot).              │
+│  Super_Admin users see the entire bucket root.                       │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-To give a user a custom folder name (e.g. a shared company bucket), set the `custom:sftp_folder` attribute on their Cognito account — the Lambda will use it in preference to the derived name.
+### S3 Folder Structure
 
-### Adding a new client
+| Path                             | Purpose                                                     |
+| -------------------------------- | ----------------------------------------------------------- |
+| `{Company_ID}/To_Navara/`        | Client uploads files **to** Navara here                     |
+| `{Company_ID}/From_Navara/`      | Navara places files **for** the client here                 |
+| `{Company_ID}/To_Navara/.keep`   | 0-byte placeholder — created automatically on first sign-up |
+| `{Company_ID}/From_Navara/.keep` | 0-byte placeholder — created automatically on first sign-up |
 
-**Step 1 — Create their Cognito account:**
+### Access Control Matrix
+
+| Principal    | Cognito Group     | IAM Role                         | Visible Scope         |
+| ------------ | ----------------- | -------------------------------- | --------------------- |
+| Company user | _(none required)_ | `transfer-user` + session policy | `{company_id}/*` only |
+| Super Admin  | `Super_Admin`     | `transfer-super-admin`           | Entire bucket (`/*`)  |
+
+The session policy applied to company users at login time is the second layer of defence: even if the IAM role were accidentally broadened, the session policy limits every action to the user's own company prefix.
+
+### S3 Folder Auto-Provisioning
+
+Because S3 is a flat key-value store, folders don't exist until an object is written. A **Cognito Post-Confirmation Lambda** (`terraform/post-confirmation/index.py`) fires automatically whenever a new user completes account confirmation. It:
+
+1. Reads `custom:company_id` from the confirmed user's Cognito attributes.
+2. Calls `s3:HeadObject` on `{company_id}/To_Navara/.keep` and `{company_id}/From_Navara/.keep`.
+3. Writes a 0-byte `.keep` object to any path that doesn't yet exist.
+
+This means the first user onboarded for a new company triggers folder creation automatically — Navara admins never have to pre-create folders manually.
+
+---
+
+## User Management Guide
+
+### Prerequisites
+
+```bash
+# Retrieve the Cognito User Pool ID from Terraform outputs
+POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
+REGION=us-east-1
+PROFILE=joey-navara   # adjust to your AWS CLI profile
+```
+
+---
+
+### Creating a New User — AWS Console
+
+1. Open **AWS Console → Cognito → User Pools → `navara-sftp-users` → Users → Create user**.
+2. Set **Invitation message** to _Send an email invitation_ (or suppress it — your choice).
+3. Enter the user's **email address** as both the username and email attribute.
+4. Tick **Mark email as verified**.
+5. Set an initial temporary password.
+6. Add the custom attribute `custom:company_id` with the company's ID string (e.g. `acme-corp`). _(See note below on first-time attribute setup.)_
+7. Click **Create user**.
+
+> **First-time custom attribute setup**: If `custom:company_id` does not yet appear in the pool schema, add it once via CLI:
+>
+> ```bash
+> aws cognito-idp add-custom-attributes \
+>   --user-pool-id $POOL_ID \
+>   --custom-attributes Name=company_id,AttributeDataType=String,Mutable=true \
+>   --region $REGION --profile $PROFILE
+> ```
+
+---
+
+### Creating a New User — AWS CLI
 
 ```bash
 POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
 
 aws cognito-idp admin-create-user \
   --user-pool-id $POOL_ID \
-  --username client@example.com \
+  --username user@example.com \
   --temporary-password "TempPass123!" \
   --user-attributes \
-    Name=email,Value=client@example.com \
+    Name=email,Value=user@example.com \
     Name=email_verified,Value=true \
+    Name=custom:company_id,Value=acme-corp \
   --message-action SUPPRESS \
-  --region us-east-1 \
-  --profile joey-navara
-
-aws cognito-idp admin-add-user-to-group \
-  --user-pool-id $POOL_ID \
-  --username client@example.com \
-  --group-name tenant_user \
-  --region us-east-1 \
-  --profile joey-navara
+  --region $REGION \
+  --profile $PROFILE
 ```
 
-`--message-action SUPPRESS` skips the Cognito welcome email so you control how credentials are delivered.
+`--message-action SUPPRESS` skips the Cognito welcome email — send credentials out-of-band via your preferred secure channel.
 
-> You can also do this in **AWS Console → Cognito → User Pools → your pool → Users → Create user**.
+> ⚠️ **Important**: The user must complete their first login through the **web portal** to set a permanent password before SFTP will work. If they attempt SFTP with the temporary password, the auth Lambda will deny them (Cognito issues a `NEW_PASSWORD_REQUIRED` challenge that cannot be satisfied over SFTP).
 
-**Step 2 — (Optional) Set a custom S3 folder:**
+---
 
-Skip this if the derived name (`client-example-com`) is fine. Set it if you want a specific folder name (e.g. for a company):
+### Assigning a User to a Company
+
+If a user was created without a `company_id`, or needs to be moved to a different company:
 
 ```bash
-# First add the custom attribute to the user pool (one-time, per pool):
-aws cognito-idp add-custom-attributes \
-  --user-pool-id $POOL_ID \
-  --custom-attributes Name=sftp_folder,AttributeDataType=String,Mutable=true \
-  --region us-east-1 --profile joey-navara
-
-# Then set it on the user:
 aws cognito-idp admin-update-user-attributes \
   --user-pool-id $POOL_ID \
-  --username client@example.com \
-  --user-attributes Name=custom:sftp_folder,Value=clients/acme-corp \
-  --region us-east-1 --profile joey-navara
+  --username user@example.com \
+  --user-attributes Name=custom:company_id,Value=acme-corp \
+  --region $REGION --profile $PROFILE
 ```
 
-**Step 3 — Send the client their credentials:**
+The change takes effect on the user's **next SFTP session** (each session re-fetches attributes from Cognito).
 
-```
-Web portal: https://d2i0sz4mcgor37.cloudfront.net
-SFTP host:  (from: terraform output sftp_endpoint)
-SFTP port:  22
-Username:   client@example.com     ← same for both web and SFTP
-Password:   TempPass123!           ← prompted to set permanent password on first web login
-```
+---
 
-The client must log into the web portal first to set their permanent password before SFTP will work. If they try SFTP with the temporary password, the Lambda denies them (Cognito returns a NEW_PASSWORD_REQUIRED challenge, which cannot be completed over SFTP).
+### Assigning a User to the Super_Admin Group
 
-### Resetting a client's password
+Super admins bypass company-level restrictions and see the entire S3 bucket.
 
 ```bash
-POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id $POOL_ID \
+  --username admin@navara.com \
+  --group-name Super_Admin \
+  --region $REGION --profile $PROFILE
+```
 
+To **remove** Super_Admin privileges:
+
+```bash
+aws cognito-idp admin-remove-user-from-group \
+  --user-pool-id $POOL_ID \
+  --username admin@navara.com \
+  --group-name Super_Admin \
+  --region $REGION --profile $PROFILE
+```
+
+> **Note**: `custom:company_id` is not required for Super_Admin users. The auth Lambda checks group membership first; if the user is in `Super_Admin`, `company_id` is ignored.
+
+---
+
+### Resetting a User Password
+
+```bash
+# Force the user to set a new password on next web portal login:
 aws cognito-idp admin-set-user-password \
   --user-pool-id $POOL_ID \
-  --username client@example.com \
-  --password "NewTempPass456!" \
+  --username user@example.com \
+  --password "NewTemp789!" \
   --no-permanent \
-  --region us-east-1 --profile joey-navara
+  --region $REGION --profile $PROFILE
+
+# Set a permanent password directly (no change required on next login):
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username user@example.com \
+  --password "PermanentP@ss1" \
+  --permanent \
+  --region $REGION --profile $PROFILE
 ```
 
-`--no-permanent` forces them to set a new password on next web portal login. Alternatively use `--permanent` to set a final password directly without requiring a change.
+---
 
-### Removing a client
+### Removing a User
 
 ```bash
-POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
-
 aws cognito-idp admin-delete-user \
   --user-pool-id $POOL_ID \
-  --username client@example.com \
-  --region us-east-1 --profile joey-navara
+  --username user@example.com \
+  --region $REGION --profile $PROFILE
 ```
 
-Deleting the Cognito user immediately revokes both web portal and SFTP access — there are no separate SSH keys or Transfer Family users to clean up.
+Deleting the Cognito user immediately revokes both web portal and SFTP access. No SSH keys or Transfer Family users need to be cleaned up separately.
 
-> Their S3 files remain at `s3://navara-sftp-911788523695/clients/{folder}/`. Delete manually if required:
+> **S3 files are NOT deleted automatically.** To remove a company's data:
 >
 > ```bash
-> aws s3 rm s3://navara-sftp-911788523695/clients/client-example-com/ --recursive --profile joey-navara
+> BUCKET=$(terraform -chdir=terraform output -raw sftp_bucket)
+> aws s3 rm s3://$BUCKET/acme-corp/ --recursive --profile $PROFILE
 > ```
 
-### Listing active clients
+---
+
+### Listing All Users
 
 ```bash
-# All Cognito users (web portal + SFTP)
+# All users in the pool
 aws cognito-idp list-users \
-  --user-pool-id $(terraform -chdir=terraform output -raw cognito_user_pool_id) \
-  --region us-east-1 --profile joey-navara
+  --user-pool-id $POOL_ID \
+  --region $REGION --profile $PROFILE
+
+# Filter to a specific company
+aws cognito-idp list-users \
+  --user-pool-id $POOL_ID \
+  --filter 'custom:company_id = "acme-corp"' \
+  --region $REGION --profile $PROFILE
+
+# List only Super_Admin members
+aws cognito-idp list-users-in-group \
+  --user-pool-id $POOL_ID \
+  --group-name Super_Admin \
+  --region $REGION --profile $PROFILE
 ```
 
-### Viewing a client's files (admin)
+---
+
+## Company Management Guide
+
+### Onboarding a New Company — End-to-End Flow
+
+```
+Admin creates the first user for the company
+         │  (sets custom:company_id = "new-company")
+         ▼
+Cognito sends account confirmation email to the user
+         │
+         ▼
+User clicks the confirmation link
+         │
+         ▼
+Cognito fires Post-Confirmation trigger
+         │
+         ▼
+post-confirmation Lambda reads custom:company_id
+         │
+         ▼
+Lambda writes 0-byte .keep objects:
+  s3://bucket/new-company/To_Navara/.keep
+  s3://bucket/new-company/From_Navara/.keep
+         │
+         ▼
+User sets permanent password via web portal
+         │
+         ▼
+User connects via SFTP or WebDAV — home directory is ready
+```
+
+No manual S3 folder creation is ever required. The pipeline is fully automated.
+
+---
+
+### Choosing a Company ID
+
+The `company_id` value becomes an S3 key prefix. Follow these rules:
+
+| Rule                                             | Reason                                                   |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| Use lowercase letters, numbers, and hyphens only | S3 keys are case-sensitive; consistency avoids confusion |
+| No spaces or special characters                  | Prevents encoding issues in SFTP paths                   |
+| Keep it short and stable                         | Renaming later requires migrating all S3 objects         |
+
+**Good examples**: `acme-corp`, `globex`, `initech-uk`
+
+**Bad examples**: `Acme Corp`, `client@example.com`, `company_1/subfolder`
+
+---
+
+### Manually Provisioning Folders (if Auto-Provisioning Missed)
+
+If a user was created before the Post-Confirmation trigger was attached (or if the Lambda failed), provision folders manually:
+
+**Option A — AWS CLI**
 
 ```bash
-# List
-aws s3 ls s3://navara-sftp-911788523695/clients/client-example-com/ --profile joey-navara
+BUCKET=$(terraform -chdir=terraform output -raw sftp_bucket)
+COMPANY=acme-corp
 
-# Download
-aws s3 cp s3://navara-sftp-911788523695/clients/client-example-com/report.pdf ./report.pdf --profile joey-navara
+# Write the .keep placeholders
+aws s3api put-object --bucket $BUCKET --key "$COMPANY/To_Navara/.keep" --body /dev/null --profile $PROFILE
+aws s3api put-object --bucket $BUCKET --key "$COMPANY/From_Navara/.keep" --body /dev/null --profile $PROFILE
+
+# Verify
+aws s3 ls s3://$BUCKET/$COMPANY/ --recursive --profile $PROFILE
 ```
 
-You can also share files with clients through the web portal (admin dashboard → uploads tab).
+**Option B — Manually invoke the Post-Confirmation Lambda**
 
-### Migrating the existing `client-upload` SFTP user
+```bash
+aws lambda invoke \
+  --function-name navara-sftp-post-confirmation \
+  --payload '{
+    "userName": "user@acme.com",
+    "request": {
+      "userAttributes": [
+        {"Name": "custom:company_id", "Value": "acme-corp"}
+      ]
+    }
+  }' \
+  --cli-binary-format raw-in-base64-out \
+  /tmp/response.json \
+  --region $REGION --profile $PROFILE
 
-The previous `client-upload` user authenticated via SSH key. To migrate:
+cat /tmp/response.json
+```
 
-1. Create a Cognito account for their email address (Step 1 above)
-2. Set `custom:sftp_folder = clients/client-upload` so their existing S3 files are preserved (Step 2 above)
-3. Send them their new credentials — they now use email + password instead of an SSH key
-4. Their SFTP host will change (the Transfer Family server was recreated when switching identity providers) — send them the new host from `terraform output sftp_endpoint`
+---
+
+### Verifying a Company's S3 Folders
+
+```bash
+BUCKET=$(terraform -chdir=terraform output -raw sftp_bucket)
+
+# List all objects for a company
+aws s3 ls s3://$BUCKET/acme-corp/ --recursive --profile $PROFILE
+
+# Download a file placed in From_Navara for the client
+aws s3 cp "s3://$BUCKET/acme-corp/From_Navara/report.pdf" ./report.pdf --profile $PROFILE
+
+# Upload a file to From_Navara for the client
+aws s3 cp ./invoice.pdf "s3://$BUCKET/acme-corp/From_Navara/invoice.pdf" --profile $PROFILE
+```
+
+---
+
+### Adding Additional Users to an Existing Company
+
+Simply create new Cognito users with the **same `custom:company_id`** value. They will land in the already-provisioned company folder. The Post-Confirmation Lambda is a no-op when the `.keep` files already exist.
+
+```bash
+# Second user at acme-corp — no new S3 folder needed, Lambda is idempotent
+aws cognito-idp admin-create-user \
+  --user-pool-id $POOL_ID \
+  --username another@acme.com \
+  --temporary-password "TempPass123!" \
+  --user-attributes \
+    Name=email,Value=another@acme.com \
+    Name=email_verified,Value=true \
+    Name=custom:company_id,Value=acme-corp \
+  --message-action SUPPRESS \
+  --region $REGION --profile $PROFILE
+```
+
+---
+
+## Client Connection Guide
+
+Users connect with a **single set of credentials** for all access methods:
+
+| Field    | Value                                                  |
+| -------- | ------------------------------------------------------ |
+| Username | Their Cognito email address                            |
+| Password | Their Cognito password (set on first web portal login) |
+
+> ⚠️ **Mandatory first step**: The user **must** log into the web portal at least once to set a permanent password before SFTP or drive mounting will work. Temporary passwords are rejected by the SFTP auth Lambda.
+
+---
+
+### Connection Details
+
+```bash
+# Retrieve live endpoint values from Terraform
+terraform -chdir=terraform output sftp_endpoint       # SFTP hostname
+terraform -chdir=terraform output webdav_endpoint     # WebDAV URL
+terraform -chdir=terraform output app_url             # Web portal URL
+```
+
+| Method     | Address                                                                 |
+| ---------- | ----------------------------------------------------------------------- |
+| Web portal | `https://<cloudfront-domain>`                                           |
+| WebDAV     | `https://<cloudfront-domain>/api/dav`                                   |
+| SFTP       | `<transfer-server-id>.server.transfer.<region>.amazonaws.com` port `22` |
+
+---
+
+### Option A — WebDAV (Recommended for most users)
+
+WebDAV is built into both Windows and macOS. No extra software is required. Users see their company folder (`To_Navara/` and `From_Navara/`) directly in File Explorer or Finder.
+
+**Limitation**: WebDAV operates through the web portal; the user sees their personal files area, not the raw `To_Navara/From_Navara` hierarchy. If you need the exact SFTP folder structure in the drive mount, use Option B instead.
+
+#### Windows — Map Network Drive (WebDAV)
+
+1. Open **File Explorer → This PC → Computer (ribbon) → Map Network Drive**.
+2. Choose an unused drive letter (e.g. `Z:`).
+3. In the **Folder** field, enter:
+   ```
+   https://<cloudfront-domain>/api/dav
+   ```
+4. Tick **Reconnect at sign-in** and **Connect using different credentials**.
+5. Click **Finish**. When prompted, enter:
+   - **Username**: their email address
+   - **Password**: their Cognito permanent password
+6. The drive appears in File Explorer as `Z: (dav)`.
+
+**Command-line equivalent (run as Administrator):**
+
+```cmd
+net use Z: "https://<cloudfront-domain>/api/dav" /user:user@acme.com "TheirPassword" /persistent:yes
+```
+
+#### macOS — Mount in Finder (WebDAV)
+
+1. In Finder, press **⌘K** (or **Go → Connect to Server…**).
+2. Enter the server address:
+   ```
+   https://<cloudfront-domain>/api/dav
+   ```
+3. Click **Connect**.
+4. Select **Registered User**, enter email and Cognito password, click **Connect**.
+5. The drive mounts on the Desktop and in Finder's sidebar under **Locations**.
+
+---
+
+### Option B — SFTP Drive Mount (Direct S3 Folder Access)
+
+SFTP mounting exposes the exact `To_Navara/` and `From_Navara/` folder structure. This is the recommended method when users need to see the canonical company folder hierarchy.
+
+#### Windows — SSHFS-Win (Free)
+
+SSHFS-Win maps SFTP as a Windows network drive with no monthly fee.
+
+**Installation (one-time, run as Administrator):**
+
+```powershell
+# Install WinFsp (the FUSE driver)
+winget install WinFsp.WinFsp
+
+# Install SSHFS-Win
+winget install SSHFS-Win.SSHFS-Win
+```
+
+**Mounting:**
+
+```cmd
+net use X: \\sshfs\user@acme.com@<sftp-endpoint>!22 /user:user@acme.com "TheirPassword" /persistent:yes
+```
+
+Replace:
+
+- `X:` with any available drive letter
+- `user@acme.com` with the user's email
+- `<sftp-endpoint>` with the Transfer Family hostname (from `terraform output sftp_endpoint`)
+- `TheirPassword` with their Cognito permanent password
+
+After connecting, drive `X:` contains `To_Navara/` and `From_Navara/` at the root — the logical chroot means the company folder **is** the root.
+
+**To disconnect:**
+
+```cmd
+net use X: /delete
+```
+
+#### Windows — RaiDrive (GUI option, freemium)
+
+1. Download and install [RaiDrive](https://www.raidrive.com/).
+2. Click **Add** → choose **NAS → SFTP**.
+3. Fill in:
+   - **Address**: `<sftp-endpoint>`
+   - **Port**: `22`
+   - **Account**: email address
+   - **Password**: Cognito permanent password
+4. Click **Connect**. A new drive letter appears in File Explorer.
+
+#### macOS — SFTP via Mountain Duck (Paid, easiest)
+
+[Mountain Duck](https://mountainduck.io/) mounts SFTP as a macOS volume (appears in Finder):
+
+1. Install Mountain Duck.
+2. Click **Open Connection** → **SFTP (SSH File Transfer Protocol)**.
+3. Enter:
+   - **Server**: `<sftp-endpoint>`
+   - **Port**: `22`
+   - **Username**: email address
+   - **Password**: Cognito permanent password
+4. Click **Connect**. The company folder mounts in Finder.
+
+#### macOS — SFTP via Cyberduck (Free browser)
+
+Cyberduck doesn't mount as a native volume but provides full file management:
+
+1. Install [Cyberduck](https://cyberduck.io/).
+2. Click **Open Connection** → **SFTP**.
+3. Enter the same server/username/password as above.
+4. Navigate files, drag-and-drop to upload/download.
+
+---
+
+### Troubleshooting
+
+| Symptom                                                      | Likely Cause                                 | Fix                                                                            |
+| ------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| SFTP auth fails with "permission denied"                     | Temporary password not yet replaced          | User must log into the web portal first to set a permanent password            |
+| "Home directory not found" on SFTP login                     | `company_id` folders not provisioned         | Run manual provisioning (see Company Management Guide above)                   |
+| WebDAV shows 401 Unauthorized                                | Wrong credentials or app password expired    | Verify email/password or regenerate an app password in the web portal Settings |
+| SFTP connects but shows empty directory                      | `custom:company_id` not set on the user      | Set the attribute via CLI: `admin-update-user-attributes`                      |
+| Cannot write files (SFTP)                                    | User not yet confirmed in Cognito            | Check user status in Cognito console; confirm if needed                        |
+| Windows "The folder you entered does not appear to be valid" | HTTPS certificate or WebClient service issue | Ensure the WebClient Windows service is running: `Start-Service WebClient`     |
 
 ---
 
@@ -365,5 +740,7 @@ The previous `client-upload` user authenticated via SSH key. To migrate:
 | [lib/ingestion-validation.ts](lib/ingestion-validation.ts)                             | Ingestion validation rules engine                    |
 | [Dockerfile.lambda](Dockerfile.lambda)                                                 | Lambda container image                               |
 | [terraform/main.tf](terraform/main.tf)                                                 | All AWS infrastructure                               |
+| [terraform/sftp-auth/index.mjs](terraform/sftp-auth/index.mjs)                         | SFTP custom auth Lambda (Node.js)                    |
+| [terraform/post-confirmation/index.py](terraform/post-confirmation/index.py)           | S3 folder auto-provisioner Lambda (Python)           |
 | [.github/workflows/deploy.yml](.github/workflows/deploy.yml)                           | Full CI/CD deploy pipeline                           |
 | [.github/workflows/ci.yml](.github/workflows/ci.yml)                                   | PR-only CI gate                                      |

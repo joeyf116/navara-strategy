@@ -140,6 +140,12 @@ resource "aws_cognito_user_pool" "this" {
     }
   }
 
+  # Fires after every successful sign-up confirmation (admin or self-service).
+  # The Lambda creates the company's To_Navara/ and From_Navara/ folder stubs.
+  lambda_config {
+    post_confirmation = aws_lambda_function.post_confirmation.arn
+  }
+
   tags = local.common_tags
 }
 
@@ -167,6 +173,14 @@ resource "aws_cognito_user_pool_domain" "this" {
 }
 
 # Super_Admin group — members bypass company folder restrictions and get full bucket access.
+#
+# Import block: on first apply the group may already exist in AWS (created outside Terraform).
+# This import is idempotent — Terraform skips it if the resource is already in state.
+import {
+  to = aws_cognito_user_group.super_admin
+  id = "${aws_cognito_user_pool.this.id}/Super_Admin"
+}
+
 resource "aws_cognito_user_group" "super_admin" {
   name         = "Super_Admin"
   user_pool_id = aws_cognito_user_pool.this.id
@@ -186,6 +200,88 @@ resource "aws_cognito_user_pool_client" "sftp_auth" {
     "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
+}
+
+# -----------------------------------------------------------------------------
+# Post-Confirmation Lambda — auto-provisions company S3 folders
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "post_confirmation_lambda" {
+  name = "${var.project_name}-post-confirmation-lambda"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "post_confirmation_basic" {
+  role       = aws_iam_role.post_confirmation_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "post_confirmation_s3" {
+  name = "${var.project_name}-post-confirmation-s3"
+  role = aws_iam_role.post_confirmation_lambda.id
+
+  # Needs GetObject (covers HeadObject) and PutObject to create .keep stubs.
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "FolderProvision"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+        ]
+        Resource = "${aws_s3_bucket.transfer.arn}/*"
+      }
+    ]
+  })
+}
+
+data "archive_file" "post_confirmation" {
+  type        = "zip"
+  source_file = "${path.module}/post-confirmation/index.py"
+  output_path = "${path.module}/post-confirmation.zip"
+}
+
+resource "aws_lambda_function" "post_confirmation" {
+  function_name    = "${var.project_name}-post-confirmation"
+  role             = aws_iam_role.post_confirmation_lambda.arn
+  runtime          = "python3.12"
+  handler          = "index.handler"
+  filename         = data.archive_file.post_confirmation.output_path
+  source_code_hash = data.archive_file.post_confirmation.output_base64sha256
+  timeout          = 30
+
+  environment {
+    variables = {
+      S3_BUCKET = aws_s3_bucket.transfer.bucket
+    }
+  }
+
+  tags = local.common_tags
+}
+
+# Grant Cognito permission to invoke this Lambda.
+resource "aws_lambda_permission" "cognito_post_confirmation" {
+  statement_id  = "AllowCognitoInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.post_confirmation.function_name
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.this.arn
 }
 
 # -----------------------------------------------------------------------------

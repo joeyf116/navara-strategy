@@ -73,6 +73,11 @@ output "company_user_role_arn" {
   description = "IAM role ARN returned by the SFTP auth Lambda for regular company users (scoped further by session policy)"
 }
 
+output "post_confirmation_lambda_arn" {
+  value       = aws_lambda_function.post_confirmation.arn
+  description = "ARN of the Cognito Post-Confirmation Lambda that auto-provisions company S3 folders"
+}
+
 output "sftp_mount_instructions" {
   value       = "Windows (WebDAV): Map network drive to ${aws_cloudfront_distribution.web.domain_name}/api/dav | Windows (SSHFS-Win): \\\\sshfs\\<email>@${aws_transfer_server.this.endpoint}!22 | macOS: Finder ⌘K → https://${aws_cloudfront_distribution.web.domain_name}/api/dav"
   description = "Quick-reference mount strings for Windows File Explorer and macOS Finder"

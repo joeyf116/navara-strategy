@@ -210,18 +210,20 @@ Every company gets a private, isolated folder in a single shared S3 bucket. User
 │  1. AdminInitiateAuth   ──► Cognito User Pool                        │
 │  2. AdminGetUser        ──► read custom:company_id                   │
 │  3. AdminListGroups     ──► check Super_Admin membership             │
+│  4. Read S3 metadata    ──► .metadata/company-access/<email>.json    │
 │                                                                      │
 │  Super_Admin → HomeDirectoryType: PATH  → s3://bucket/              │
-│  Company user → HomeDirectoryType: LOGICAL → s3://bucket/{co_id}/   │
-│               + session policy restricting to that prefix only       │
+│  Company user → HomeDirectoryType: LOGICAL with one or many entries │
+│               /<company> → s3://bucket/<company>/                    │
+│               + session policy restricting to granted prefixes only   │
 └──────────────────────────────┬───────────────────────────────────────┘
                                │ IAM AssumeRole + session policy
                                ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │                    S3 Bucket  (single shared)                        │
 │                                                                      │
-│   {Company_A}/To_Navara/        {Company_B}/To_Navara/               │
-│   {Company_A}/From_Navara/      {Company_B}/From_Navara/             │
+│   {company_a}/to_navara/        {company_b}/to_navara/               │
+│   {company_a}/from_navara/      {company_b}/from_navara/             │
 │                                                                      │
 │  Company_A users see ONLY Company_A/ (logical chroot).              │
 │  Super_Admin users see the entire bucket root.                       │
@@ -230,31 +232,57 @@ Every company gets a private, isolated folder in a single shared S3 bucket. User
 
 ### S3 Folder Structure
 
-| Path                             | Purpose                                                     |
-| -------------------------------- | ----------------------------------------------------------- |
-| `{Company_ID}/To_Navara/`        | Client uploads files **to** Navara here                     |
-| `{Company_ID}/From_Navara/`      | Navara places files **for** the client here                 |
-| `{Company_ID}/To_Navara/.keep`   | 0-byte placeholder — created automatically on first sign-up |
-| `{Company_ID}/From_Navara/.keep` | 0-byte placeholder — created automatically on first sign-up |
+| Path                             | Purpose                                                   |
+| -------------------------------- | --------------------------------------------------------- |
+| `{company_id}/to_navara/`        | Client uploads files **to** Navara here                   |
+| `{company_id}/from_navara/`      | Navara places files **for** the client here               |
+| `{company_id}/to_navara/.keep`   | 0-byte placeholder — created automatically on first setup |
+| `{company_id}/from_navara/.keep` | 0-byte placeholder — created automatically on first setup |
 
 ### Access Control Matrix
 
-| Principal    | Cognito Group     | IAM Role                         | Visible Scope         |
-| ------------ | ----------------- | -------------------------------- | --------------------- |
-| Company user | _(none required)_ | `transfer-user` + session policy | `{company_id}/*` only |
-| Super Admin  | `Super_Admin`     | `transfer-super-admin`           | Entire bucket (`/*`)  |
+| Principal    | Cognito Group     | IAM Role                         | Visible Scope                         |
+| ------------ | ----------------- | -------------------------------- | ------------------------------------- |
+| Company user | _(none required)_ | `transfer-user` + session policy | One or more `{company_id}/*` prefixes |
+| Super Admin  | `Super_Admin`     | `transfer-super-admin`           | Entire bucket (`/*`)                  |
 
-The session policy applied to company users at login time is the second layer of defence: even if the IAM role were accidentally broadened, the session policy limits every action to the user's own company prefix.
+The session policy applied to company users at login time is the second layer of defence: even if the IAM role were accidentally broadened, the session policy limits every action to explicitly granted company prefixes.
 
 ### S3 Folder Auto-Provisioning
 
 Because S3 is a flat key-value store, folders don't exist until an object is written. A **Cognito Post-Confirmation Lambda** (`terraform/post-confirmation/index.py`) fires automatically whenever a new user completes account confirmation. It:
 
 1. Reads `custom:company_id` from the confirmed user's Cognito attributes.
-2. Calls `s3:HeadObject` on `{company_id}/To_Navara/.keep` and `{company_id}/From_Navara/.keep`.
+2. Calls `s3:HeadObject` on `{company_id}/to_navara/.keep` and `{company_id}/from_navara/.keep`.
 3. Writes a 0-byte `.keep` object to any path that doesn't yet exist.
 
 This means the first user onboarded for a new company triggers folder creation automatically — Navara admins never have to pre-create folders manually.
+
+### Company Access Metadata
+
+Web portal and SFTP multi-company access is controlled by:
+
+- `s3://<bucket>/<FILES_BUCKET_PREFIX>/.metadata/company-access/<urlencoded-email>.json`
+- Shape: `{ "grants": [{ "companyId": "acme-corp", "canWrite": true }] }`
+
+Super admins can manage these mappings from **Settings → Company Access Management**.
+
+### Migration / Reset Runbook
+
+Use this when moving from legacy `user-files/` layout to company-root layout.
+
+1. Deploy application + Terraform changes first.
+2. Create required companies in Settings (or API) so roots and `.keep` files exist.
+3. Grant users company access (single or multi-company).
+4. Optional clean reset (destructive):
+
+```bash
+BUCKET=$(terraform -chdir=terraform output -raw sftp_bucket)
+PREFIX=uploads
+aws s3 rm s3://$BUCKET/$PREFIX/user-files/ --recursive --profile $PROFILE
+```
+
+Only run the reset after confirming all required company data is migrated or intentionally discarded.
 
 ---
 

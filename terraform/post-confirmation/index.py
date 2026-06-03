@@ -5,15 +5,14 @@ Triggered automatically after a user confirms their Cognito account
 (both admin-confirmed and self-confirmed flows).
 
 Flow:
-  1. Extract custom:company_id from the confirmed user's attributes.
-  2. If company_id is present, ensure the two canonical folder prefixes exist
-     in the Transfer Family S3 bucket by writing a 0-byte placeholder (.keep)
-     to each path when it is missing.
+    1. Extract company IDs from custom:company_id.
+    2. For each company, ensure canonical folder prefixes exist in S3 by writing
+         a 0-byte placeholder (.keep) at each path when missing.
   3. Always return the Cognito event unchanged so the sign-up flow continues.
 
 S3 paths provisioned:
-  s3://{bucket}/{company_id}/To_Navara/.keep
-  s3://{bucket}/{company_id}/From_Navara/.keep
+    s3://{bucket}/{company_id}/to_navara/.keep
+    s3://{bucket}/{company_id}/from_navara/.keep
 """
 
 import os
@@ -24,7 +23,19 @@ s3 = boto3.client("s3")
 BUCKET = os.environ["S3_BUCKET"]
 
 # Subdirectory names that must exist for every company.
-REQUIRED_SUBDIRS = ["To_Navara", "From_Navara"]
+REQUIRED_SUBDIRS = ["to_navara", "from_navara"]
+
+
+def _normalize_company_id(raw: str) -> str:
+    return "-".join(
+        filter(
+            None,
+            "".join(
+                ch.lower() if (ch.isalnum() or ch in "_-") else "-"
+                for ch in (raw or "").strip()
+            ).split("-")
+        )
+    )[:64]
 
 
 def _ensure_placeholder(company_id: str, subdir: str) -> None:
@@ -51,21 +62,27 @@ def handler(event, context):
         for attr in event.get("request", {}).get("userAttributes", [])
     }
 
-    company_id = user_attrs.get("custom:company_id", "").strip()
+    raw_company_id = user_attrs.get("custom:company_id", "").strip()
     username = event.get("userName", "unknown")
 
-    if not company_id:
+    company_ids = []
+    normalized = _normalize_company_id(raw_company_id)
+    if normalized:
+        company_ids.append(normalized)
+
+    if not company_ids:
         print(
-            f"[post-confirmation] user={username} has no custom:company_id"
+            f"[post-confirmation] user={username} has no company assignment"
             " – skipping folder provision (user may be Super_Admin or misconfigured)"
         )
         # Returning the event unchanged is REQUIRED by Cognito; never raise here.
         return event
 
-    print(f"[post-confirmation] provisioning folders for company={company_id} user={username}")
+    for company_id in company_ids:
+        print(f"[post-confirmation] provisioning folders for company={company_id} user={username}")
 
-    for subdir in REQUIRED_SUBDIRS:
-        _ensure_placeholder(company_id, subdir)
+        for subdir in REQUIRED_SUBDIRS:
+            _ensure_placeholder(company_id, subdir)
 
-    print(f"[post-confirmation] done for company={company_id}")
+        print(f"[post-confirmation] done for company={company_id}")
     return event

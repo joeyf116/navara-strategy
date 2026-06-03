@@ -26,16 +26,33 @@ interface LoginFormProps {
 	isDev: boolean;
 	hasCognito: boolean;
 	callbackUrl?: string;
+	authError?: string;
+}
+
+function getAuthErrorMessage(error?: string): string {
+	if (!error) return "";
+
+	switch (error) {
+		case "AccessDenied":
+			return "Access denied by the identity provider. Verify the user exists, is enabled/confirmed, and has a permanent password in Cognito.";
+		case "Configuration":
+			return "Authentication is misconfigured. Check AUTH_COGNITO_ID, AUTH_COGNITO_SECRET, and AUTH_COGNITO_ISSUER.";
+		case "Verification":
+			return "Unable to verify the authentication response. Check callback URL and issuer settings.";
+		default:
+			return `Authentication failed (${error}).`;
+	}
 }
 
 export function LoginForm({
 	isDev,
 	hasCognito,
 	callbackUrl = "/uploads",
+	authError,
 }: LoginFormProps) {
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const [error, setError] = useState("");
+	const [error, setError] = useState(getAuthErrorMessage(authError));
 	const [isLoading, setIsLoading] = useState(false);
 	const [showDevLogin, setShowDevLogin] = useState(isDev && !hasCognito);
 	const router = useRouter();

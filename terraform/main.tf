@@ -655,6 +655,14 @@ resource "aws_iam_role_policy" "sftp_auth_lambda" {
           "cognito-idp:AdminListGroupsForUser",
         ]
         Resource = aws_cognito_user_pool.this.arn
+      },
+      {
+        Sid    = "ReadCompanyAccessMetadata"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+        ]
+        Resource = "${aws_s3_bucket.transfer.arn}/${var.files_bucket_prefix}/.metadata/company-access/*"
       }
     ]
   })
@@ -683,6 +691,7 @@ resource "aws_lambda_function" "sftp_auth" {
       TRANSFER_USER_ROLE_ARN  = aws_iam_role.transfer_user.arn
       SUPER_ADMIN_ROLE_ARN    = aws_iam_role.transfer_super_admin.arn
       S3_BUCKET               = aws_s3_bucket.transfer.bucket
+      FILES_BUCKET_PREFIX     = var.files_bucket_prefix
     }
   }
 

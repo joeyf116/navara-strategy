@@ -3,6 +3,7 @@ import Cognito from "next-auth/providers/cognito";
 import Credentials from "next-auth/providers/credentials";
 import type { Provider } from "next-auth/providers";
 import type { UserRole } from "@/lib/types";
+import { logger } from "@/lib/logger";
 
 declare module "next-auth" {
 	interface User {
@@ -94,17 +95,46 @@ function roleFromCognitoProfile(profile: unknown): UserRole {
 	return "tenant_user";
 }
 
+function summarizeAuthLoggerDetails(
+	details: unknown[],
+): Record<string, unknown> {
+	if (details.length === 0) {
+		return {};
+	}
+
+	const first = details[0];
+	if (!first || typeof first !== "object") {
+		return { details: String(first) };
+	}
+
+	const src = first as Record<string, unknown>;
+	return {
+		error: src.error,
+		provider: src.provider,
+		code: src.code,
+	};
+}
+
 // Build the list of providers based on environment
 function buildProviders(): Provider[] {
 	const providers: Provider[] = [];
 
 	// Production: AWS Cognito
-	if (process.env.AUTH_COGNITO_ID && process.env.AUTH_COGNITO_SECRET) {
+	if (
+		process.env.AUTH_COGNITO_ID &&
+		process.env.AUTH_COGNITO_SECRET &&
+		process.env.AUTH_COGNITO_ISSUER
+	) {
 		providers.push(
 			Cognito({
 				clientId: process.env.AUTH_COGNITO_ID,
 				clientSecret: process.env.AUTH_COGNITO_SECRET,
 				issuer: process.env.AUTH_COGNITO_ISSUER,
+				authorization: {
+					params: {
+						scope: "openid email profile",
+					},
+				},
 			}),
 		);
 	}
@@ -143,6 +173,22 @@ function buildProviders(): Provider[] {
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
 	providers: buildProviders(),
+	trustHost: true,
+	logger: {
+		error(code, ...details) {
+			logger.error("auth", `NextAuth error: ${code}`, undefined, {
+				...summarizeAuthLoggerDetails(details),
+			});
+		},
+		warn(code) {
+			logger.warn("auth", `NextAuth warning: ${code}`);
+		},
+		debug(code, ...details) {
+			logger.debug("auth", `NextAuth debug: ${code}`, {
+				...summarizeAuthLoggerDetails(details),
+			});
+		},
+	},
 	callbacks: {
 		jwt({ token, user, account, profile }) {
 			if (user) {

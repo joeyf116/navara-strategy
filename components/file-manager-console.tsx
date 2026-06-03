@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
 	Table,
 	TableBody,
@@ -56,8 +55,7 @@ type DialogState =
 	| { type: "closed" }
 	| { type: "newFolder" }
 	| { type: "rename"; entry: Entry }
-	| { type: "delete"; entry: Entry }
-	| { type: "share"; entry: Entry };
+	| { type: "delete"; entry: Entry };
 
 function formatSize(bytes: number) {
 	if (bytes === 0) return "—";
@@ -81,8 +79,6 @@ export function FileManagerConsole() {
 	// Dialog field state
 	const [folderName, setFolderName] = useState("");
 	const [renameName, setRenameName] = useState("");
-	const [shareEmail, setShareEmail] = useState("");
-	const [shareWrite, setShareWrite] = useState(false);
 	const [dialogWorking, setDialogWorking] = useState(false);
 
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -150,12 +146,6 @@ export function FileManagerConsole() {
 
 	function openDelete(entry: Entry) {
 		setDialog({ type: "delete", entry });
-	}
-
-	function openShare(entry: Entry) {
-		setShareEmail("");
-		setShareWrite(false);
-		setDialog({ type: "share", entry });
 	}
 
 	function closeDialog() {
@@ -232,33 +222,6 @@ export function FileManagerConsole() {
 		closeDialog();
 	}
 
-	async function confirmShare() {
-		if (dialog.type !== "share") return;
-		const email = shareEmail.trim().toLowerCase();
-		if (!email) return;
-		setDialogWorking(true);
-		const response = await fetch("/api/files/tree", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				action: "share",
-				nodeId: dialog.entry.id,
-				granteeEmail: email,
-				canWrite: shareWrite,
-			}),
-		});
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-		};
-		setDialogWorking(false);
-		if (!response.ok) {
-			setStatus({ message: payload.error ?? "Share failed.", error: true });
-		} else {
-			setStatus({ message: `Shared with ${email}.` });
-		}
-		closeDialog();
-	}
-
 	async function uploadFile(file: File) {
 		await new Promise<void>((resolve) => {
 			const xhr = new XMLHttpRequest();
@@ -298,7 +261,7 @@ export function FileManagerConsole() {
 				<div>
 					<h1 className="text-2xl font-bold">Files</h1>
 					<p className="text-muted-foreground">
-						Browse and manage your files. Changes sync to WebDAV automatically.
+						Browse files by company. Changes sync to WebDAV automatically.
 					</p>
 				</div>
 
@@ -328,20 +291,6 @@ export function FileManagerConsole() {
 
 							{/* Toolbar */}
 							<div className="flex items-center gap-2">
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => navigate("/My Files")}
-								>
-									My Files
-								</Button>
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => navigate("/Shared with Me")}
-								>
-									Shared with Me
-								</Button>
 								<Button variant="outline" size="sm" onClick={openNewFolder}>
 									<FolderPlus className="mr-1.5 h-4 w-4" />
 									New Folder
@@ -481,16 +430,17 @@ export function FileManagerConsole() {
 															</DropdownMenuItem>
 														)}
 														{entry.kind === "file" && <DropdownMenuSeparator />}
-														<DropdownMenuItem onClick={() => openRename(entry)}>
+														<DropdownMenuItem
+															onClick={() => openRename(entry)}
+															disabled={!entry.canWrite}
+														>
 															Rename
-														</DropdownMenuItem>
-														<DropdownMenuItem onClick={() => openShare(entry)}>
-															Share…
 														</DropdownMenuItem>
 														<DropdownMenuSeparator />
 														<DropdownMenuItem
 															className="text-destructive focus:text-destructive"
 															onClick={() => openDelete(entry)}
+															disabled={!entry.canWrite}
 														>
 															Delete
 														</DropdownMenuItem>
@@ -523,7 +473,7 @@ export function FileManagerConsole() {
 						<Label htmlFor="folder-name">Folder name</Label>
 						<Input
 							id="folder-name"
-							placeholder="My Folder"
+							placeholder="new-folder"
 							value={folderName}
 							onChange={(e) => setFolderName(e.target.value)}
 							onKeyDown={(e) => e.key === "Enter" && void confirmCreateFolder()}
@@ -631,69 +581,6 @@ export function FileManagerConsole() {
 								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 							)}
 							Delete
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
-
-			{/* Share Dialog */}
-			<Dialog
-				open={dialog.type === "share"}
-				onOpenChange={(open) => !open && closeDialog()}
-			>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>
-							Share &ldquo;{dialog.type === "share" ? dialog.entry.name : ""}
-							&rdquo;
-						</DialogTitle>
-						<DialogDescription>
-							Grant another user access to this{" "}
-							{dialog.type === "share" ? dialog.entry.kind : "item"}.
-						</DialogDescription>
-					</DialogHeader>
-					<div className="space-y-4">
-						<div className="space-y-1.5">
-							<Label htmlFor="share-email">Email address</Label>
-							<Input
-								id="share-email"
-								type="email"
-								placeholder="colleague@company.com"
-								value={shareEmail}
-								onChange={(e) => setShareEmail(e.target.value)}
-								autoFocus
-							/>
-						</div>
-						<div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
-							<div>
-								<p className="text-sm font-medium">Allow editing</p>
-								<p className="text-xs text-muted-foreground">
-									Grants upload and delete permissions
-								</p>
-							</div>
-							<Switch
-								checked={shareWrite}
-								onCheckedChange={setShareWrite}
-								aria-label="Allow write access"
-							/>
-						</div>
-					</div>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={closeDialog}
-							disabled={dialogWorking}
-						>
-							Cancel
-						</Button>
-						<Button
-							onClick={() => void confirmShare()}
-							disabled={!shareEmail.trim() || dialogWorking}
-						>
-							{dialogWorking && (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-							)}
-							Share
 						</Button>
 					</DialogFooter>
 				</DialogContent>

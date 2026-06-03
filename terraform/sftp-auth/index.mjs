@@ -2,14 +2,11 @@
  * AWS Transfer Family custom identity provider.
  *
  * Flow:
- *  1. Authenticate the supplied username (email) + password against Cognito.
- *  2. Fetch the user's custom:company_id attribute and group membership.
- *  3a. Super_Admin group members → full bucket access, home dir = bucket root.
- *  3b. Regular users with a company_id → scoped session policy restricting them
- *      to /<bucket>/<company_id>/ only, home dir = that prefix (logical chroot).
- *  4. No company_id and not Super_Admin → deny (return {}).
- *
- * Returning an empty object {} denies access.
+ *  1. Authenticate Cognito username/password.
+ *  2. Fetch groups + attributes.
+ *  3. Resolve companies from custom:company_id plus metadata grants.
+ *  4. Super_Admin: full bucket access. Other users: logical root with one
+ *     entry per accessible company and session policy scoped to those prefixes.
  */
 
 import {
@@ -18,8 +15,10 @@ import {
 	AdminGetUserCommand,
 	AdminListGroupsForUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 const cognito = new CognitoIdentityProviderClient({});
+const s3 = new S3Client({});
 
 const {
 	COGNITO_USER_POOL_ID,
@@ -27,7 +26,136 @@ const {
 	TRANSFER_USER_ROLE_ARN,
 	SUPER_ADMIN_ROLE_ARN,
 	S3_BUCKET,
+	FILES_BUCKET_PREFIX,
 } = process.env;
+
+function normalizeCompanyId(value) {
+	return String(value ?? "")
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9_-]+/g, "-")
+		.replace(/-{2,}/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 64);
+}
+
+function normalizeEmail(value) {
+	return String(value ?? "")
+		.trim()
+		.toLowerCase();
+}
+
+function withPrefix(value) {
+	const prefix = (FILES_BUCKET_PREFIX ?? "uploads").replace(/^\/+|\/+$/g, "");
+	return prefix ? `${prefix}/${value}` : value;
+}
+
+function companyAccessKey(email) {
+	return withPrefix(
+		`.metadata/company-access/${encodeURIComponent(email)}.json`,
+	);
+}
+
+async function streamToBuffer(body) {
+	if (!body) return Buffer.alloc(0);
+	if (body instanceof Uint8Array) return Buffer.from(body);
+	if (typeof body.transformToByteArray === "function") {
+		return Buffer.from(await body.transformToByteArray());
+	}
+	if (typeof body[Symbol.asyncIterator] === "function") {
+		const chunks = [];
+		for await (const chunk of body) {
+			chunks.push(Buffer.from(chunk));
+		}
+		return Buffer.concat(chunks);
+	}
+	throw new Error("Unsupported response body type");
+}
+
+async function readCompanyAccessFromMetadata(email) {
+	try {
+		const resp = await s3.send(
+			new GetObjectCommand({
+				Bucket: S3_BUCKET,
+				Key: companyAccessKey(email),
+			}),
+		);
+		const body = await streamToBuffer(resp.Body);
+		const payload = JSON.parse(body.toString("utf8"));
+		if (!Array.isArray(payload?.grants)) {
+			return [];
+		}
+
+		return payload.grants
+			.map((grant) => normalizeCompanyId(grant?.companyId))
+			.filter(Boolean);
+	} catch (error) {
+		if (error?.name === "NoSuchKey") return [];
+		console.log(
+			JSON.stringify({
+				result: "warn",
+				reason: "company-access-read-failed",
+				error: error?.name,
+				email,
+			}),
+		);
+		return [];
+	}
+}
+
+function buildSessionPolicy(companies) {
+	const prefixes = companies.flatMap((companyId) => [
+		`${companyId}`,
+		`${companyId}/*`,
+	]);
+	const objectArns = companies.map(
+		(companyId) => `arn:aws:s3:::${S3_BUCKET}/${companyId}/*`,
+	);
+
+	return JSON.stringify({
+		Version: "2012-10-17",
+		Statement: [
+			{
+				Sid: "ListGrantedCompanyFolders",
+				Effect: "Allow",
+				Action: ["s3:ListBucket"],
+				Resource: `arn:aws:s3:::${S3_BUCKET}`,
+				Condition: {
+					StringLike: {
+						"s3:prefix": prefixes,
+					},
+				},
+			},
+			{
+				Sid: "GrantedCompanyObjectCRUD",
+				Effect: "Allow",
+				Action: [
+					"s3:GetObject",
+					"s3:PutObject",
+					"s3:DeleteObject",
+					"s3:GetObjectVersion",
+					"s3:DeleteObjectVersion",
+				],
+				Resource: objectArns,
+			},
+		],
+	});
+}
+
+function buildHomeDirectoryDetails(companies) {
+	if (companies.length === 1) {
+		return JSON.stringify([
+			{ Entry: "/", Target: `/${S3_BUCKET}/${companies[0]}` },
+		]);
+	}
+
+	return JSON.stringify(
+		companies.map((companyId) => ({
+			Entry: `/${companyId}`,
+			Target: `/${S3_BUCKET}/${companyId}`,
+		})),
+	);
+}
 
 export const handler = async (event) => {
 	const { username, password, protocol = "SFTP" } = event;
@@ -36,7 +164,7 @@ export const handler = async (event) => {
 		console.log(
 			JSON.stringify({
 				result: "denied",
-				reason: "no-password",
+				reason: "missing-credentials",
 				username,
 				protocol,
 			}),
@@ -44,7 +172,6 @@ export const handler = async (event) => {
 		return {};
 	}
 
-	// ── Step 1: Authenticate ────────────────────────────────────────────────
 	let authResult;
 	try {
 		authResult = await cognito.send(
@@ -55,9 +182,14 @@ export const handler = async (event) => {
 				AuthParameters: { USERNAME: username, PASSWORD: password },
 			}),
 		);
-	} catch (err) {
+	} catch (error) {
 		console.log(
-			JSON.stringify({ result: "denied", reason: err.name, username }),
+			JSON.stringify({
+				result: "denied",
+				reason: error?.name,
+				username,
+				protocol,
+			}),
 		);
 		return {};
 	}
@@ -69,13 +201,14 @@ export const handler = async (event) => {
 				reason: "challenge",
 				challenge: authResult.ChallengeName,
 				username,
+				protocol,
 			}),
 		);
 		return {};
 	}
 
-	// ── Step 2: Fetch user attributes and group membership in parallel ───────
-	let userInfo, groupsInfo;
+	let userInfo;
+	let groupsInfo;
 	try {
 		[userInfo, groupsInfo] = await Promise.all([
 			cognito.send(
@@ -91,33 +224,33 @@ export const handler = async (event) => {
 				}),
 			),
 		]);
-	} catch (err) {
+	} catch (error) {
 		console.log(
 			JSON.stringify({
 				result: "denied",
 				reason: "attribute-fetch-error",
-				error: err.name,
+				error: error?.name,
 				username,
+				protocol,
 			}),
 		);
 		return {};
 	}
 
 	const attrs = Object.fromEntries(
-		(userInfo.UserAttributes ?? []).map((a) => [a.Name, a.Value]),
+		(userInfo.UserAttributes ?? []).map((attr) => [attr.Name, attr.Value]),
 	);
-	const companyId = attrs["custom:company_id"] ?? null;
-	const isSuperAdmin = (groupsInfo.Groups ?? []).some(
-		(g) => g.GroupName === "Super_Admin",
-	);
+	const isSuperAdmin = (groupsInfo.Groups ?? []).some((group) => {
+		const groupName = String(group.GroupName ?? "").toLowerCase();
+		return groupName === "super_admin" || groupName === "super-admin";
+	});
 
-	// ── Step 3a: Super Admin — full bucket access, no session-policy restriction ──
 	if (isSuperAdmin) {
 		console.log(
 			JSON.stringify({
 				result: "allowed",
-				username,
 				role: "super-admin",
+				username,
 				protocol,
 			}),
 		);
@@ -128,63 +261,39 @@ export const handler = async (event) => {
 		};
 	}
 
-	// ── Step 3b: Company user — logical chroot to /<bucket>/<company_id> ────
-	if (!companyId) {
+	const userEmail = normalizeEmail(attrs.email || username);
+	const metadataCompanies = await readCompanyAccessFromMetadata(userEmail);
+	const companyFromAttr = normalizeCompanyId(attrs["custom:company_id"]);
+	const companies = [
+		...new Set([...metadataCompanies, companyFromAttr].filter(Boolean)),
+	];
+
+	if (companies.length === 0) {
 		console.log(
-			JSON.stringify({ result: "denied", reason: "no-company-id", username }),
+			JSON.stringify({
+				result: "denied",
+				reason: "no-company-access",
+				username,
+				protocol,
+			}),
 		);
 		return {};
 	}
 
-	// Session policy further restricts the role to this company's prefix only.
-	// Effective permissions = role_permissions ∩ session_policy_permissions.
-	const sessionPolicy = JSON.stringify({
-		Version: "2012-10-17",
-		Statement: [
-			{
-				Sid: "ListCompanyFolder",
-				Effect: "Allow",
-				Action: ["s3:ListBucket"],
-				Resource: `arn:aws:s3:::${S3_BUCKET}`,
-				Condition: {
-					StringLike: {
-						"s3:prefix": [`${companyId}/*`, `${companyId}`],
-					},
-				},
-			},
-			{
-				Sid: "CompanyObjectCRUD",
-				Effect: "Allow",
-				Action: [
-					"s3:GetObject",
-					"s3:PutObject",
-					"s3:DeleteObject",
-					"s3:GetObjectVersion",
-					"s3:DeleteObjectVersion",
-				],
-				Resource: `arn:aws:s3:::${S3_BUCKET}/${companyId}/*`,
-			},
-		],
-	});
-
 	console.log(
 		JSON.stringify({
 			result: "allowed",
-			username,
-			companyId,
 			role: "company-user",
+			username,
 			protocol,
+			companies,
 		}),
 	);
 
 	return {
 		Role: TRANSFER_USER_ROLE_ARN,
 		HomeDirectoryType: "LOGICAL",
-		// Logical chroot: the user's "/" maps to their company folder.
-		// They cannot navigate above this; other companies are invisible.
-		HomeDirectoryDetails: JSON.stringify([
-			{ Entry: "/", Target: `/${S3_BUCKET}/${companyId}` },
-		]),
-		Policy: sessionPolicy,
+		HomeDirectoryDetails: buildHomeDirectoryDetails(companies),
+		Policy: buildSessionPolicy(companies),
 	};
 };

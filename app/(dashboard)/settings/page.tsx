@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,16 @@ type ConnectionInfo = {
 	sftpEndpoint: string;
 	webdavUrl: string;
 	userEmail: string;
+	companies: string[];
+	isSuperAdmin: boolean;
+};
+
+type CompanyAccessResponse = {
+	allCompanies: string[];
+	currentUser: {
+		isSuperAdmin: boolean;
+		grants: Array<{ companyId: string; canWrite: boolean }>;
+	};
 };
 
 function CopyField({
@@ -73,11 +83,21 @@ function CopyField({
 }
 
 export default function SettingsPage() {
+	const queryClient = useQueryClient();
+	const [newCompanyId, setNewCompanyId] = useState("");
+	const [targetUserEmail, setTargetUserEmail] = useState("");
+	const [targetCompanies, setTargetCompanies] = useState("");
+	const [adminStatus, setAdminStatus] = useState<string | null>(null);
+	const [adminError, setAdminError] = useState<string | null>(null);
+	const [adminWorking, setAdminWorking] = useState(false);
+
 	const {
 		data: conn = {
 			sftpEndpoint: "",
 			webdavUrl: "",
 			userEmail: "",
+			companies: [],
+			isSuperAdmin: false,
 		},
 	} = useQuery<ConnectionInfo>({
 		queryKey: ["connection-info"],
@@ -88,6 +108,80 @@ export default function SettingsPage() {
 		},
 	});
 
+	const { data: companyAccess } = useQuery<CompanyAccessResponse>({
+		queryKey: ["company-access"],
+		queryFn: async () => {
+			const response = await fetch("/api/settings/company-access");
+			if (!response.ok) throw new Error("Failed to load company access.");
+			return response.json() as Promise<CompanyAccessResponse>;
+		},
+	});
+
+	async function createCompanyAction() {
+		const companyId = newCompanyId.trim();
+		if (!companyId) return;
+
+		setAdminStatus(null);
+		setAdminError(null);
+		setAdminWorking(true);
+		const response = await fetch("/api/settings/company-access", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ action: "createCompany", companyId }),
+		});
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+			companyId?: string;
+		};
+		setAdminWorking(false);
+
+		if (!response.ok) {
+			setAdminError(payload.error ?? "Failed to create company.");
+			return;
+		}
+
+		setNewCompanyId("");
+		setAdminStatus(`Created company ${payload.companyId ?? companyId}.`);
+		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
+		await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
+	}
+
+	async function saveUserAccessAction() {
+		const userEmail = targetUserEmail.trim().toLowerCase();
+		if (!userEmail) return;
+
+		const grants = targetCompanies
+			.split(",")
+			.map((companyId) => companyId.trim())
+			.filter(Boolean)
+			.map((companyId) => ({ companyId, canWrite: true }));
+
+		setAdminStatus(null);
+		setAdminError(null);
+		setAdminWorking(true);
+		const response = await fetch("/api/settings/company-access", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				action: "setUserAccess",
+				userEmail,
+				grants,
+			}),
+		});
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+		};
+		setAdminWorking(false);
+
+		if (!response.ok) {
+			setAdminError(payload.error ?? "Failed to save user access.");
+			return;
+		}
+
+		setAdminStatus(`Updated company access for ${userEmail}.`);
+		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
+	}
+
 	return (
 		<div className="space-y-6">
 			<div>
@@ -96,6 +190,87 @@ export default function SettingsPage() {
 					Connect your file explorer to Navara using SFTP or WebDAV.
 				</p>
 			</div>
+
+			{conn.isSuperAdmin && (
+				<Card>
+					<CardHeader>
+						<CardTitle>Company Access Management</CardTitle>
+						<CardDescription>
+							Create company roots and assign users to one or more companies.
+						</CardDescription>
+					</CardHeader>
+					<CardContent className="space-y-5">
+						<div className="grid gap-4 md:grid-cols-2">
+							<div className="space-y-2">
+								<Label htmlFor="new-company">Create company</Label>
+								<div className="flex gap-2">
+									<Input
+										id="new-company"
+										placeholder="acme-corp"
+										value={newCompanyId}
+										onChange={(event) => setNewCompanyId(event.target.value)}
+									/>
+									<Button
+										onClick={() => void createCompanyAction()}
+										disabled={!newCompanyId.trim() || adminWorking}
+									>
+										Create
+									</Button>
+								</div>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="all-companies">Known companies</Label>
+								<Input
+									id="all-companies"
+									readOnly
+									value={(companyAccess?.allCompanies ?? []).join(", ")}
+									placeholder="No companies yet"
+								/>
+							</div>
+						</div>
+
+						<Separator />
+
+						<div className="space-y-2">
+							<Label htmlFor="target-user">User email</Label>
+							<Input
+								id="target-user"
+								type="email"
+								placeholder="user@company.com"
+								value={targetUserEmail}
+								onChange={(event) => setTargetUserEmail(event.target.value)}
+							/>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="target-companies">
+								Companies (comma separated)
+							</Label>
+							<Input
+								id="target-companies"
+								placeholder="acme-corp, beta-industries"
+								value={targetCompanies}
+								onChange={(event) => setTargetCompanies(event.target.value)}
+							/>
+						</div>
+
+						<div className="flex items-center gap-2">
+							<Button
+								onClick={() => void saveUserAccessAction()}
+								disabled={!targetUserEmail.trim() || adminWorking}
+							>
+								Save User Access
+							</Button>
+							{adminStatus && (
+								<p className="text-sm text-muted-foreground">{adminStatus}</p>
+							)}
+							{adminError && (
+								<p className="text-sm text-destructive">{adminError}</p>
+							)}
+						</div>
+					</CardContent>
+				</Card>
+			)}
 
 			{/* ── Native Drive Mapping ─────────────────────────────────────── */}
 			<Card>
@@ -214,7 +389,7 @@ export default function SettingsPage() {
 									</li>
 									<li>
 										Enter your portal password when prompted. Your company
-										folder will appear as drive root.
+										folders appear at drive root.
 									</li>
 								</ol>
 							</div>
@@ -368,6 +543,11 @@ export default function SettingsPage() {
 							placeholder="Your portal password"
 						/>
 					</div>
+					{conn.companies.length > 0 && (
+						<p className="text-xs text-muted-foreground">
+							Accessible companies: {conn.companies.join(", ")}
+						</p>
+					)}
 
 					{conn.sftpEndpoint && conn.userEmail ? (
 						<>

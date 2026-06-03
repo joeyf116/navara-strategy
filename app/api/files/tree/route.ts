@@ -7,7 +7,6 @@ import {
 	deleteNode,
 	listViewerDirectory,
 	renameNode,
-	shareNodeWithUser,
 	uploadFileInMyFiles,
 } from "@/lib/virtual-files";
 
@@ -62,7 +61,7 @@ export async function POST(request: Request) {
 		if (contentType.includes("multipart/form-data")) {
 			const formData = await request.formData();
 			const file = formData.get("file");
-			const targetPath = String(formData.get("path") ?? "/My Files");
+			const targetPath = String(formData.get("path") ?? "/");
 
 			if (!(file instanceof File)) {
 				return NextResponse.json(
@@ -76,16 +75,13 @@ export async function POST(request: Request) {
 		}
 
 		const body = (await request.json().catch(() => null)) as {
-			action?: "createFolder" | "share";
+			action?: "createFolder";
 			path?: string;
 			name?: string;
-			nodeId?: string;
-			granteeEmail?: string;
-			canWrite?: boolean;
 		} | null;
 
 		if (body?.action === "createFolder") {
-			const parentPath = body.path ?? "/My Files";
+			const parentPath = body.path ?? "/";
 			const name = body.name?.trim() || "";
 			if (!name) {
 				return NextResponse.json(
@@ -96,26 +92,6 @@ export async function POST(request: Request) {
 
 			const id = await createFolderInMyFiles(email, parentPath, name);
 			return NextResponse.json({ id }, { status: 201 });
-		}
-
-		if (body?.action === "share") {
-			const nodeId = body.nodeId?.trim() || "";
-			const granteeEmail = body.granteeEmail?.trim() || "";
-
-			if (!nodeId || !granteeEmail) {
-				return NextResponse.json(
-					{ error: "nodeId and granteeEmail are required." },
-					{ status: 400 },
-				);
-			}
-
-			await shareNodeWithUser(
-				email,
-				nodeId,
-				granteeEmail,
-				Boolean(body.canWrite),
-			);
-			return NextResponse.json({ ok: true });
 		}
 
 		return NextResponse.json({ error: "Unsupported action." }, { status: 400 });

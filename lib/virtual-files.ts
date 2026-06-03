@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import {
 	CopyObjectCommand,
 	DeleteObjectCommand,
@@ -9,6 +7,11 @@ import {
 	PutObjectCommand,
 	S3Client,
 } from "@aws-sdk/client-s3";
+
+import {
+	normalizeCompanyId,
+	resolveUserCompanyAccess,
+} from "@/lib/company-access";
 
 export type VirtualNodeKind = "file" | "folder";
 
@@ -41,59 +44,40 @@ type CopyOptions = {
 	depth: "0" | "infinity";
 };
 
-type ShareRecord = {
-	id: string;
-	ownerEmail: string;
-	s3KeyPrefix: string;
-	nodeName: string;
-	nodeKind: VirtualNodeKind;
-	canWrite: boolean;
-	createdAt: string;
-};
-
 const filesBucket = process.env.FILES_BUCKET?.trim() || "";
 const filesBucketPrefix = (
 	process.env.FILES_BUCKET_PREFIX?.trim() || "uploads"
 ).replace(/^\/+|\/+$/g, "");
 const s3Client = filesBucket ? new S3Client({}) : null;
 
-// ─── Path / key helpers ───────────────────────────────────────────────────────
+const ROOT_FOLDERS = ["to_navara", "from_navara"];
 
-function normalizeEmail(email: string) {
-	return email.trim().toLowerCase();
-}
-
-function encodeEmail(email: string) {
-	return encodeURIComponent(normalizeEmail(email));
-}
-
-function splitPath(rawPath: string) {
+function splitPath(rawPath: string): string[] {
 	return rawPath
 		.split("/")
 		.map((segment) => segment.trim())
 		.filter(Boolean);
 }
 
-function normalizeVirtualPath(rawPath: string) {
-	return `/${splitPath(rawPath).join("/")}`;
+function normalizeVirtualPath(rawPath: string): string {
+	const parts = splitPath(rawPath);
+	return parts.length === 0 ? "/" : `/${parts.join("/")}`;
 }
 
-function metaKey(type: string, name: string): string {
-	const base = filesBucketPrefix ? `${filesBucketPrefix}/` : "";
-	return `${base}.metadata/${type}/${name}`;
+function withPrefix(value: string): string {
+	return filesBucketPrefix ? `${filesBucketPrefix}/${value}` : value;
 }
 
-function userKeyPrefix(email: string): string {
-	const base = filesBucketPrefix ? `${filesBucketPrefix}/` : "";
-	return `${base}user-files/${encodeEmail(email)}/`;
+function companyPrefix(companyId: string): string {
+	return withPrefix(`${companyId}/`);
 }
 
 function segmentsToS3Key(
-	email: string,
+	companyId: string,
 	relSegments: string[],
 	isFolder: boolean,
 ): string {
-	const prefix = userKeyPrefix(email);
+	const prefix = companyPrefix(companyId);
 	const joined = relSegments.join("/");
 	return isFolder ? `${prefix}${joined}/` : `${prefix}${joined}`;
 }
@@ -110,27 +94,71 @@ function decodeNodeId(id: string): string | null {
 	}
 }
 
-// ─── S3 primitives ────────────────────────────────────────────────────────────
+function makeViewerNode(
+	name: string,
+	kind: VirtualNodeKind,
+	ownerEmail: string,
+	sizeBytes: number,
+	updatedAt: string,
+	canWrite: boolean,
+	virtualPath: string,
+): ViewerNode {
+	return {
+		id: makeNodeId(virtualPath),
+		name,
+		kind,
+		ownerEmail,
+		sizeBytes,
+		updatedAt,
+		canWrite,
+		virtualPath,
+	};
+}
+
+function makeVirtualNode(
+	s3Key: string,
+	ownerEmail: string,
+	name: string,
+	kind: VirtualNodeKind,
+	sizeBytes: number,
+	contentType: string | null,
+	lastModified: Date,
+	virtualPath: string,
+): VirtualNode {
+	const iso = lastModified.toISOString();
+	return {
+		id: makeNodeId(virtualPath),
+		owner_email: ownerEmail,
+		parent_id: null,
+		name,
+		kind,
+		storage_key: s3Key,
+		size_bytes: sizeBytes,
+		content_type: contentType,
+		created_at: iso,
+		updated_at: iso,
+	};
+}
 
 async function streamToBuffer(body: unknown): Promise<Buffer> {
 	if (!body) return Buffer.alloc(0);
 	if (body instanceof Uint8Array) return Buffer.from(body);
-	const xf = body as { transformToByteArray?: () => Promise<Uint8Array> };
-	if (typeof xf.transformToByteArray === "function") {
-		return Buffer.from(await xf.transformToByteArray());
+	const transformed = body as {
+		transformToByteArray?: () => Promise<Uint8Array>;
+	};
+	if (typeof transformed.transformToByteArray === "function") {
+		return Buffer.from(await transformed.transformToByteArray());
 	}
-	const ai = body as AsyncIterable<Uint8Array>;
-	if (typeof ai[Symbol.asyncIterator] === "function") {
+	const iterable = body as AsyncIterable<Uint8Array>;
+	if (typeof iterable[Symbol.asyncIterator] === "function") {
 		const chunks: Buffer[] = [];
-		for await (const chunk of ai) chunks.push(Buffer.from(chunk));
+		for await (const chunk of iterable) chunks.push(Buffer.from(chunk));
 		return Buffer.concat(chunks);
 	}
 	throw new Error("Unsupported storage body type.");
 }
 
-async function headS3Object(
-	s3Key: string,
-): Promise<{
+async function headS3Object(s3Key: string): Promise<{
 	sizeBytes: number;
 	lastModified: Date;
 	contentType: string;
@@ -145,20 +173,20 @@ async function headS3Object(
 			lastModified: resp.LastModified ?? new Date(0),
 			contentType: resp.ContentType ?? "application/octet-stream",
 		};
-	} catch (err: unknown) {
+	} catch (error: unknown) {
 		if (
-			(err as { name?: string }).name === "NotFound" ||
-			(err as { $metadata?: { httpStatusCode?: number } }).$metadata
+			(error as { name?: string }).name === "NotFound" ||
+			(error as { $metadata?: { httpStatusCode?: number } }).$metadata
 				?.httpStatusCode === 404
 		) {
 			return null;
 		}
-		throw err;
+		throw error;
 	}
 }
 
 async function listS3Dir(
-	email: string,
+	companyId: string,
 	relSegments: string[],
 ): Promise<{
 	folders: string[];
@@ -167,23 +195,24 @@ async function listS3Dir(
 	if (!filesBucket || !s3Client) return { folders: [], files: [] };
 	const prefix =
 		relSegments.length > 0
-			? segmentsToS3Key(email, relSegments, true)
-			: userKeyPrefix(email);
+			? segmentsToS3Key(companyId, relSegments, true)
+			: companyPrefix(companyId);
 
 	const folders: string[] = [];
 	const files: Array<{ key: string; size: number; lastModified: Date }> = [];
-	let ct: string | undefined;
+	let continuationToken: string | undefined;
+
 	do {
 		const resp = await s3Client.send(
 			new ListObjectsV2Command({
 				Bucket: filesBucket,
 				Prefix: prefix,
 				Delimiter: "/",
-				ContinuationToken: ct,
+				ContinuationToken: continuationToken,
 			}),
 		);
-		for (const cp of resp.CommonPrefixes ?? []) {
-			if (cp.Prefix) folders.push(cp.Prefix);
+		for (const commonPrefix of resp.CommonPrefixes ?? []) {
+			if (commonPrefix.Prefix) folders.push(commonPrefix.Prefix);
 		}
 		for (const obj of resp.Contents ?? []) {
 			if (!obj.Key || obj.Key === prefix) continue;
@@ -193,31 +222,36 @@ async function listS3Dir(
 				lastModified: obj.LastModified ?? new Date(0),
 			});
 		}
-		ct = resp.NextContinuationToken;
-	} while (ct);
+		continuationToken = resp.NextContinuationToken;
+	} while (continuationToken);
+
 	return { folders, files };
 }
 
 async function listAllS3Objects(
-	keyPrefix: string,
+	prefix: string,
 ): Promise<Array<{ key: string; size: number }>> {
 	if (!filesBucket || !s3Client) return [];
-	const results: Array<{ key: string; size: number }> = [];
-	let ct: string | undefined;
+	const out: Array<{ key: string; size: number }> = [];
+	let continuationToken: string | undefined;
+
 	do {
 		const resp = await s3Client.send(
 			new ListObjectsV2Command({
 				Bucket: filesBucket,
-				Prefix: keyPrefix,
-				ContinuationToken: ct,
+				Prefix: prefix,
+				ContinuationToken: continuationToken,
 			}),
 		);
 		for (const obj of resp.Contents ?? []) {
-			if (obj.Key) results.push({ key: obj.Key, size: obj.Size ?? 0 });
+			if (obj.Key) {
+				out.push({ key: obj.Key, size: obj.Size ?? 0 });
+			}
 		}
-		ct = resp.NextContinuationToken;
-	} while (ct);
-	return results;
+		continuationToken = resp.NextContinuationToken;
+	} while (continuationToken);
+
+	return out;
 }
 
 async function putContent(
@@ -268,348 +302,266 @@ async function copyS3Object(srcKey: string, dstKey: string): Promise<void> {
 	);
 }
 
-// ─── Share record helpers ─────────────────────────────────────────────────────
+async function getAccessGrant(
+	viewerEmailRaw: string,
+	companyIdRaw: string,
+): Promise<{ companyId: string; canWrite: boolean } | null> {
+	const companyId = normalizeCompanyId(companyIdRaw);
+	if (!companyId) return null;
+	const access = await resolveUserCompanyAccess(viewerEmailRaw);
+	const grant = access.grants.find((item) => item.companyId === companyId);
+	if (!grant) return null;
+	return grant;
+}
 
-async function readSharesForGrantee(email: string): Promise<ShareRecord[]> {
-	const key = metaKey("shares", `${encodeEmail(email)}.json`);
-	if (!filesBucket || !s3Client) return [];
-	try {
-		const resp = await s3Client.send(
-			new GetObjectCommand({ Bucket: filesBucket, Key: key }),
-		);
-		const buf = await streamToBuffer(resp.Body);
-		return JSON.parse(buf.toString("utf8")) as ShareRecord[];
-	} catch (err: unknown) {
-		if ((err as { name?: string }).name === "NoSuchKey") return [];
-		throw err;
+function sanitizeSegments(segments: string[]): string[] {
+	return segments
+		.map((segment) => segment.trim())
+		.filter(Boolean)
+		.map((segment) => segment.replace(/\.+/g, "."));
+}
+
+async function getNodeForViewer(
+	viewerEmailRaw: string,
+	id: string,
+): Promise<{ node: VirtualNode; canWrite: boolean } | null> {
+	const virtualPath = decodeNodeId(id);
+	if (!virtualPath) return null;
+
+	const segments = sanitizeSegments(splitPath(virtualPath));
+	if (segments.length === 0) return null;
+
+	const companyId = normalizeCompanyId(segments[0]);
+	const grant = await getAccessGrant(viewerEmailRaw, companyId);
+	if (!grant) return null;
+
+	if (segments.length === 1) {
+		const rootPrefix = companyPrefix(companyId);
+		return {
+			node: makeVirtualNode(
+				rootPrefix,
+				companyId,
+				companyId,
+				"folder",
+				0,
+				null,
+				new Date(),
+				`/${companyId}`,
+			),
+			canWrite: grant.canWrite,
+		};
 	}
-}
 
-async function writeSharesForGrantee(
-	email: string,
-	shares: ShareRecord[],
-): Promise<void> {
-	const key = metaKey("shares", `${encodeEmail(email)}.json`);
-	if (!filesBucket || !s3Client) return;
-	await s3Client.send(
-		new PutObjectCommand({
-			Bucket: filesBucket,
-			Key: key,
-			Body: JSON.stringify(shares),
-			ContentType: "application/json",
-		}),
-	);
-}
-
-/** Returns true when any share grants access to the given owner+path combo. */
-function resolveShareAccess(
-	shares: ShareRecord[],
-	ownerEmail: string,
-	relSegments: string[],
-): { canRead: boolean; canWrite: boolean } {
-	const targetPrefix = userKeyPrefix(ownerEmail);
-	const targetKey =
-		relSegments.length > 0
-			? segmentsToS3Key(ownerEmail, relSegments, false)
-			: null;
-	const targetFolderKey =
-		relSegments.length > 0
-			? segmentsToS3Key(ownerEmail, relSegments, true)
-			: null;
-
-	let canRead = false;
-	let canWrite = false;
-
-	for (const share of shares) {
-		if (normalizeEmail(share.ownerEmail) !== normalizeEmail(ownerEmail))
-			continue;
-		// share.s3KeyPrefix is the S3 key prefix of the shared item
-		const isMatch =
-			(targetKey && targetKey.startsWith(share.s3KeyPrefix)) ||
-			(targetFolderKey && targetFolderKey.startsWith(share.s3KeyPrefix)) ||
-			(targetKey && share.s3KeyPrefix.startsWith(targetPrefix));
-		if (isMatch) {
-			canRead = true;
-			if (share.canWrite) canWrite = true;
-		}
+	const relSegments = segments.slice(1);
+	const name = relSegments.at(-1) ?? companyId;
+	const fileKey = segmentsToS3Key(companyId, relSegments, false);
+	const fileMeta = await headS3Object(fileKey);
+	if (fileMeta) {
+		return {
+			node: makeVirtualNode(
+				fileKey,
+				companyId,
+				name,
+				"file",
+				fileMeta.sizeBytes,
+				fileMeta.contentType,
+				fileMeta.lastModified,
+				normalizeVirtualPath(virtualPath),
+			),
+			canWrite: grant.canWrite,
+		};
 	}
-	return { canRead, canWrite };
+
+	const folderKey = segmentsToS3Key(companyId, relSegments, true);
+	const folderMeta = await headS3Object(folderKey);
+	if (folderMeta) {
+		return {
+			node: makeVirtualNode(
+				folderKey,
+				companyId,
+				name,
+				"folder",
+				0,
+				null,
+				folderMeta.lastModified,
+				normalizeVirtualPath(virtualPath),
+			),
+			canWrite: grant.canWrite,
+		};
+	}
+
+	const listing = await listS3Dir(companyId, relSegments);
+	if (listing.folders.length > 0 || listing.files.length > 0) {
+		return {
+			node: makeVirtualNode(
+				folderKey,
+				companyId,
+				name,
+				"folder",
+				0,
+				null,
+				new Date(),
+				normalizeVirtualPath(virtualPath),
+			),
+			canWrite: grant.canWrite,
+		};
+	}
+
+	return null;
 }
-
-// ─── Node builders ────────────────────────────────────────────────────────────
-
-function makeViewerNode(
-	name: string,
-	kind: VirtualNodeKind,
-	ownerEmail: string,
-	sizeBytes: number,
-	updatedAt: string,
-	canWrite: boolean,
-	virtualPath: string,
-): ViewerNode {
-	return {
-		id: makeNodeId(virtualPath),
-		name,
-		kind,
-		ownerEmail,
-		sizeBytes,
-		updatedAt,
-		canWrite,
-		virtualPath,
-	};
-}
-
-function makeVirtualNode(
-	s3Key: string,
-	ownerEmail: string,
-	name: string,
-	kind: VirtualNodeKind,
-	sizeBytes: number,
-	contentType: string | null,
-	lastModified: Date,
-	virtualPath: string,
-): VirtualNode {
-	const now = lastModified.toISOString();
-	return {
-		id: makeNodeId(virtualPath),
-		owner_email: ownerEmail,
-		parent_id: null,
-		name,
-		kind,
-		storage_key: s3Key,
-		size_bytes: sizeBytes,
-		content_type: contentType,
-		created_at: now,
-		updated_at: now,
-	};
-}
-
-// ─── Move/copy recursive helper ───────────────────────────────────────────────
 
 async function moveSrcToDst(
-	srcEmail: string,
+	srcCompanyId: string,
 	srcRelSegments: string[],
 	kind: VirtualNodeKind,
-	dstEmail: string,
+	dstCompanyId: string,
 	dstRelSegments: string[],
 	depth: "0" | "infinity",
 ): Promise<void> {
 	if (kind === "file") {
-		const srcKey = segmentsToS3Key(srcEmail, srcRelSegments, false);
-		const dstKey = segmentsToS3Key(dstEmail, dstRelSegments, false);
+		const srcKey = segmentsToS3Key(srcCompanyId, srcRelSegments, false);
+		const dstKey = segmentsToS3Key(dstCompanyId, dstRelSegments, false);
 		await copyS3Object(srcKey, dstKey);
 		await deleteS3Object(srcKey);
 		return;
 	}
 
-	// folder
-	const srcFolderKey = segmentsToS3Key(srcEmail, srcRelSegments, true);
-	const dstFolderKey = segmentsToS3Key(dstEmail, dstRelSegments, true);
+	const srcFolderKey = segmentsToS3Key(srcCompanyId, srcRelSegments, true);
+	const dstFolderKey = segmentsToS3Key(dstCompanyId, dstRelSegments, true);
 	await copyS3Object(srcFolderKey, dstFolderKey).catch(() => {});
 
 	if (depth === "infinity") {
 		const children = await listAllS3Objects(srcFolderKey);
 		for (const child of children) {
 			const rel = child.key.slice(srcFolderKey.length);
-			const dstChildKey = `${dstFolderKey}${rel}`;
-			await copyS3Object(child.key, dstChildKey);
+			await copyS3Object(child.key, `${dstFolderKey}${rel}`);
 		}
 	}
-	// Delete source
+
 	const srcObjects = await listAllS3Objects(srcFolderKey);
-	for (const obj of srcObjects) await deleteS3Object(obj.key);
+	for (const obj of srcObjects) {
+		await deleteS3Object(obj.key);
+	}
 	await deleteS3Object(srcFolderKey).catch(() => {});
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
-
 export async function ensureVirtualFilesSchema() {
-	// No-op: S3 is the backing store.
+	// No-op: S3 + metadata are the backing stores.
 }
 
 export async function listViewerDirectory(
 	viewerEmailRaw: string,
 	rawPath: string,
 ): Promise<ViewerNode[]> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const segments = splitPath(rawPath || "/");
+	const virtualPath = normalizeVirtualPath(rawPath || "/");
+	const segments = sanitizeSegments(splitPath(virtualPath));
+	const access = await resolveUserCompanyAccess(viewerEmailRaw);
 
 	if (segments.length === 0) {
-		return [
+		return access.grants.map((grant) =>
 			makeViewerNode(
-				"My Files",
+				grant.companyId,
 				"folder",
-				viewerEmail,
+				grant.companyId,
 				0,
 				new Date(0).toISOString(),
-				true,
-				"/My Files",
+				grant.canWrite,
+				`/${grant.companyId}`,
 			),
-			makeViewerNode(
-				"Shared with Me",
-				"folder",
-				viewerEmail,
-				0,
-				new Date(0).toISOString(),
-				false,
-				"/Shared with Me",
-			),
-		];
-	}
-
-	if (segments[0] === "My Files") {
-		const relSegments = segments.slice(1);
-		const { folders, files } = await listS3Dir(viewerEmail, relSegments);
-		const nodes: ViewerNode[] = [];
-		for (const folderPrefix of folders) {
-			const prefix = userKeyPrefix(viewerEmail);
-			const relPath = folderPrefix.slice(prefix.length).replace(/\/$/, "");
-			const name = relPath.split("/").at(-1) ?? relPath;
-			const vPath = `/My Files/${relPath}`;
-			nodes.push(
-				makeViewerNode(
-					name,
-					"folder",
-					viewerEmail,
-					0,
-					new Date(0).toISOString(),
-					true,
-					vPath,
-				),
-			);
-		}
-		for (const file of files) {
-			const prefix = userKeyPrefix(viewerEmail);
-			const relPath = file.key.slice(prefix.length);
-			const name = relPath.split("/").at(-1) ?? relPath;
-			const vPath = `/My Files/${relPath}`;
-			nodes.push(
-				makeViewerNode(
-					name,
-					"file",
-					viewerEmail,
-					file.size,
-					file.lastModified.toISOString(),
-					true,
-					vPath,
-				),
-			);
-		}
-		nodes.sort((a, b) => {
-			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-			return a.name.localeCompare(b.name);
-		});
-		return nodes;
-	}
-
-	if (segments[0] === "Shared with Me") {
-		const shares = await readSharesForGrantee(viewerEmail);
-		if (segments.length === 1) {
-			const owners = [
-				...new Set(shares.map((s) => normalizeEmail(s.ownerEmail))),
-			].sort();
-			return owners.map((owner) =>
-				makeViewerNode(
-					owner,
-					"folder",
-					owner,
-					0,
-					new Date(0).toISOString(),
-					false,
-					`/Shared with Me/${owner}`,
-				),
-			);
-		}
-
-		const ownerEmail = normalizeEmail(segments[1] ?? "");
-		const ownerShares = shares.filter(
-			(s) => normalizeEmail(s.ownerEmail) === ownerEmail,
 		);
-
-		if (segments.length === 2) {
-			const nodes: ViewerNode[] = [];
-			for (const share of ownerShares) {
-				nodes.push(
-					makeViewerNode(
-						share.nodeName,
-						share.nodeKind,
-						ownerEmail,
-						0,
-						share.createdAt,
-						share.canWrite,
-						`/Shared with Me/${ownerEmail}/${share.nodeName}`,
-					),
-				);
-			}
-			return nodes;
-		}
-
-		// Navigating inside a shared folder
-		const sharedRoot = ownerShares.find((s) => s.nodeName === segments[2]);
-		if (!sharedRoot || sharedRoot.nodeKind !== "folder") return [];
-		const innerSegments = segments.slice(3);
-		const { folders, files } = await listS3Dir(ownerEmail, [
-			sharedRoot.nodeName,
-			...innerSegments,
-		]);
-		const nodes: ViewerNode[] = [];
-		for (const folderPrefix of folders) {
-			const prefix = userKeyPrefix(ownerEmail);
-			const relPath = folderPrefix.slice(prefix.length).replace(/\/$/, "");
-			const name = relPath.split("/").at(-1) ?? relPath;
-			const vPath = `/Shared with Me/${ownerEmail}/${relPath}`;
-			nodes.push(
-				makeViewerNode(
-					name,
-					"folder",
-					ownerEmail,
-					0,
-					new Date(0).toISOString(),
-					sharedRoot.canWrite,
-					vPath,
-				),
-			);
-		}
-		for (const file of files) {
-			const prefix = userKeyPrefix(ownerEmail);
-			const relPath = file.key.slice(prefix.length);
-			const name = relPath.split("/").at(-1) ?? relPath;
-			const vPath = `/Shared with Me/${ownerEmail}/${relPath}`;
-			nodes.push(
-				makeViewerNode(
-					name,
-					"file",
-					ownerEmail,
-					file.size,
-					file.lastModified.toISOString(),
-					sharedRoot.canWrite,
-					vPath,
-				),
-			);
-		}
-		nodes.sort((a, b) => {
-			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-			return a.name.localeCompare(b.name);
-		});
-		return nodes;
 	}
 
-	return [];
+	const companyId = normalizeCompanyId(segments[0]);
+	const grant = access.grants.find((item) => item.companyId === companyId);
+	if (!grant) {
+		return [];
+	}
+
+	const relSegments = segments.slice(1);
+	const listing = await listS3Dir(companyId, relSegments);
+	const nodes: ViewerNode[] = [];
+	const prefix =
+		relSegments.length > 0
+			? segmentsToS3Key(companyId, relSegments, true)
+			: companyPrefix(companyId);
+
+	for (const folderPrefix of listing.folders) {
+		const relPath = folderPrefix.slice(prefix.length).replace(/\/$/, "");
+		if (!relPath) continue;
+		const name = relPath.split("/").at(-1) ?? relPath;
+		nodes.push(
+			makeViewerNode(
+				name,
+				"folder",
+				companyId,
+				0,
+				new Date(0).toISOString(),
+				grant.canWrite,
+				normalizeVirtualPath(
+					`/${companyId}/${[...relSegments, relPath].join("/")}`,
+				),
+			),
+		);
+	}
+
+	for (const file of listing.files) {
+		const relPath = file.key.slice(prefix.length);
+		if (!relPath) continue;
+		const name = relPath.split("/").at(-1) ?? relPath;
+		if (name === ".keep") continue;
+		nodes.push(
+			makeViewerNode(
+				name,
+				"file",
+				companyId,
+				file.size,
+				file.lastModified.toISOString(),
+				grant.canWrite,
+				normalizeVirtualPath(
+					`/${companyId}/${[...relSegments, relPath].join("/")}`,
+				),
+			),
+		);
+	}
+
+	if (relSegments.length === 0) {
+		const existing = new Set(
+			nodes.filter((node) => node.kind === "folder").map((node) => node.name),
+		);
+		for (const rootFolder of ROOT_FOLDERS) {
+			if (existing.has(rootFolder)) continue;
+			nodes.push(
+				makeViewerNode(
+					rootFolder,
+					"folder",
+					companyId,
+					0,
+					new Date(0).toISOString(),
+					grant.canWrite,
+					`/${companyId}/${rootFolder}`,
+				),
+			);
+		}
+	}
+
+	nodes.sort((a, b) => {
+		if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+		return a.name.localeCompare(b.name);
+	});
+
+	return nodes;
 }
 
 export async function findNodeByVirtualPath(
 	viewerEmailRaw: string,
 	rawPath: string,
 ): Promise<ViewerNode | null> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
 	const virtualPath = normalizeVirtualPath(rawPath);
-	const segments = splitPath(virtualPath);
-
-	if (segments.length === 0) {
+	if (virtualPath === "/") {
 		return makeViewerNode(
 			"/",
 			"folder",
-			viewerEmail,
+			"root",
 			0,
 			new Date().toISOString(),
 			false,
@@ -617,14 +569,76 @@ export async function findNodeByVirtualPath(
 		);
 	}
 
-	const parentPath = `/${segments.slice(0, -1).join("/")}` || "/";
-	const name = segments.at(-1);
-	if (!name) return null;
+	const segments = splitPath(virtualPath);
+	if (segments.length === 1) {
+		const grant = await getAccessGrant(viewerEmailRaw, segments[0]);
+		if (!grant) return null;
+		return makeViewerNode(
+			grant.companyId,
+			"folder",
+			grant.companyId,
+			0,
+			new Date().toISOString(),
+			grant.canWrite,
+			`/${grant.companyId}`,
+		);
+	}
 
-	const siblings = await listViewerDirectory(viewerEmail, parentPath);
-	return (
-		siblings.find((e) => e.name.toLowerCase() === name.toLowerCase()) ?? null
-	);
+	const parentPath = `/${segments.slice(0, -1).join("/")}`;
+	const name = segments.at(-1)?.toLowerCase();
+	if (!name) return null;
+	const siblings = await listViewerDirectory(viewerEmailRaw, parentPath);
+	return siblings.find((item) => item.name.toLowerCase() === name) ?? null;
+}
+
+async function createFolderAtPath(
+	viewerEmailRaw: string,
+	targetPath: string,
+	folderNameRaw: string,
+): Promise<string> {
+	const folderName = folderNameRaw.trim();
+	if (!folderName) throw new Error("Folder name is required.");
+
+	const targetSegments = splitPath(normalizeVirtualPath(targetPath));
+	if (targetSegments.length === 0) {
+		throw new Error("Select a company folder first.");
+	}
+
+	const companyId = normalizeCompanyId(targetSegments[0]);
+	const grant = await getAccessGrant(viewerEmailRaw, companyId);
+	if (!grant || !grant.canWrite) {
+		throw new Error("You do not have write access to this company.");
+	}
+
+	const relSegments = [...targetSegments.slice(1), folderName];
+	const folderKey = segmentsToS3Key(companyId, relSegments, true);
+	await putContent(folderKey, Buffer.alloc(0), "application/x-directory");
+
+	return makeNodeId(`/${companyId}/${relSegments.join("/")}`);
+}
+
+async function uploadFileAtPath(
+	viewerEmailRaw: string,
+	targetPath: string,
+	file: File,
+): Promise<string> {
+	const targetSegments = splitPath(normalizeVirtualPath(targetPath));
+	if (targetSegments.length === 0) {
+		throw new Error("Select a company folder first.");
+	}
+
+	const companyId = normalizeCompanyId(targetSegments[0]);
+	const grant = await getAccessGrant(viewerEmailRaw, companyId);
+	if (!grant || !grant.canWrite) {
+		throw new Error("You do not have write access to this company.");
+	}
+
+	const relSegments = [...targetSegments.slice(1), file.name];
+	const s3Key = segmentsToS3Key(companyId, relSegments, false);
+	const bytes = Buffer.from(await file.arrayBuffer());
+	await putContent(s3Key, bytes, file.type || "application/octet-stream");
+
+	return makeNodeId(`/${companyId}/${relSegments.join("/")}`);
 }
 
 export async function createFolderInMyFiles(
@@ -632,21 +646,7 @@ export async function createFolderInMyFiles(
 	targetPath: string,
 	folderNameRaw: string,
 ): Promise<string> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const folderName = folderNameRaw.trim();
-	if (!folderName) throw new Error("Folder name is required.");
-
-	const segments = splitPath(targetPath);
-	if (segments[0] !== "My Files") {
-		throw new Error("Folders can only be created in My Files.");
-	}
-
-	const relSegments = [...segments.slice(1), folderName];
-	const folderKey = segmentsToS3Key(viewerEmail, relSegments, true);
-	await putContent(folderKey, Buffer.alloc(0), "application/x-directory");
-
-	const virtualPath = `/My Files/${relSegments.join("/")}`;
-	return makeNodeId(virtualPath);
+	return createFolderAtPath(viewerEmailRaw, targetPath, folderNameRaw);
 }
 
 export async function uploadFileInMyFiles(
@@ -654,151 +654,14 @@ export async function uploadFileInMyFiles(
 	targetPath: string,
 	file: File,
 ): Promise<string> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const segments = splitPath(targetPath);
-	if (segments[0] !== "My Files") {
-		throw new Error("Uploads can only target My Files.");
-	}
-
-	const relSegments = [...segments.slice(1), file.name];
-	const s3Key = segmentsToS3Key(viewerEmail, relSegments, false);
-	const bytes = Buffer.from(await file.arrayBuffer());
-	await putContent(s3Key, bytes, file.type || "application/octet-stream");
-
-	const virtualPath = `/My Files/${relSegments.join("/")}`;
-	return makeNodeId(virtualPath);
-}
-
-export async function getNodeForViewer(
-	viewerEmailRaw: string,
-	id: string,
-): Promise<{ node: VirtualNode; canWrite: boolean } | null> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const virtualPath = decodeNodeId(id);
-	if (!virtualPath) return null;
-
-	const segments = splitPath(virtualPath);
-	if (segments.length === 0) return null;
-
-	if (segments[0] === "My Files") {
-		const relSegments = segments.slice(1);
-		if (relSegments.length === 0) return null;
-
-		const name = relSegments.at(-1)!;
-
-		// Try file first
-		const fileKey = segmentsToS3Key(viewerEmail, relSegments, false);
-		const fileMeta = await headS3Object(fileKey);
-		if (fileMeta) {
-			return {
-				node: makeVirtualNode(
-					fileKey,
-					viewerEmail,
-					name,
-					"file",
-					fileMeta.sizeBytes,
-					fileMeta.contentType,
-					fileMeta.lastModified,
-					virtualPath,
-				),
-				canWrite: true,
-			};
-		}
-
-		// Try folder
-		const folderKey = segmentsToS3Key(viewerEmail, relSegments, true);
-		const folderMeta = await headS3Object(folderKey);
-		if (folderMeta) {
-			return {
-				node: makeVirtualNode(
-					folderKey,
-					viewerEmail,
-					name,
-					"folder",
-					0,
-					null,
-					folderMeta.lastModified,
-					virtualPath,
-				),
-				canWrite: true,
-			};
-		}
-
-		// Check if directory has objects (folder without marker)
-		const { folders, files } = await listS3Dir(viewerEmail, relSegments);
-		if (folders.length > 0 || files.length > 0) {
-			return {
-				node: makeVirtualNode(
-					folderKey,
-					viewerEmail,
-					name,
-					"folder",
-					0,
-					null,
-					new Date(),
-					virtualPath,
-				),
-				canWrite: true,
-			};
-		}
-		return null;
-	}
-
-	if (segments[0] === "Shared with Me") {
-		const ownerEmail = normalizeEmail(segments[1] ?? "");
-		const ownerRelSegments = segments.slice(2);
-		if (ownerRelSegments.length === 0) return null;
-
-		const shares = await readSharesForGrantee(viewerEmail);
-		const { canRead, canWrite } = resolveShareAccess(
-			shares,
-			ownerEmail,
-			ownerRelSegments,
-		);
-		if (!canRead) return null;
-
-		const name = ownerRelSegments.at(-1)!;
-		const fileKey = segmentsToS3Key(ownerEmail, ownerRelSegments, false);
-		const fileMeta = await headS3Object(fileKey);
-		if (fileMeta) {
-			return {
-				node: makeVirtualNode(
-					fileKey,
-					ownerEmail,
-					name,
-					"file",
-					fileMeta.sizeBytes,
-					fileMeta.contentType,
-					fileMeta.lastModified,
-					virtualPath,
-				),
-				canWrite,
-			};
-		}
-		const folderKey = segmentsToS3Key(ownerEmail, ownerRelSegments, true);
-		return {
-			node: makeVirtualNode(
-				folderKey,
-				ownerEmail,
-				name,
-				"folder",
-				0,
-				null,
-				new Date(),
-				virtualPath,
-			),
-			canWrite,
-		};
-	}
-
-	return null;
+	return uploadFileAtPath(viewerEmailRaw, targetPath, file);
 }
 
 export async function downloadNodeContent(
-	viewerEmail: string,
+	viewerEmailRaw: string,
 	id: string,
 ): Promise<{ fileName: string; contentType: string; content: Buffer } | null> {
-	const access = await getNodeForViewer(viewerEmail, id);
+	const access = await getNodeForViewer(viewerEmailRaw, id);
 	if (!access || access.node.kind !== "file" || !access.node.storage_key) {
 		return null;
 	}
@@ -815,8 +678,7 @@ export async function renameNode(
 	id: string,
 	newNameRaw: string,
 ): Promise<void> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const access = await getNodeForViewer(viewerEmail, id);
+	const access = await getNodeForViewer(viewerEmailRaw, id);
 	if (!access || !access.canWrite) {
 		throw new Error("You do not have write access to this item.");
 	}
@@ -824,18 +686,24 @@ export async function renameNode(
 	const newName = newNameRaw.trim();
 	if (!newName) throw new Error("Name is required.");
 
-	const virtualPath = decodeNodeId(id)!;
-	const segments = splitPath(virtualPath);
-	const parentSegments = segments.slice(1, -1); // strips 'My Files' + filename
-	const email = access.node.owner_email;
+	const srcPath = decodeNodeId(id);
+	if (!srcPath) throw new Error("Invalid node ID.");
 
-	const newRelSegments = [...parentSegments, newName];
+	const srcSegments = splitPath(srcPath);
+	if (srcSegments.length < 2) {
+		throw new Error("Company roots cannot be renamed.");
+	}
+
+	const companyId = normalizeCompanyId(srcSegments[0]);
+	const srcRelSegments = srcSegments.slice(1);
+	const dstRelSegments = [...srcSegments.slice(1, -1), newName];
+
 	await moveSrcToDst(
-		email,
-		[...parentSegments, segments.at(-1)!],
+		companyId,
+		srcRelSegments,
 		access.node.kind,
-		email,
-		newRelSegments,
+		companyId,
+		dstRelSegments,
 		"infinity",
 	);
 }
@@ -844,8 +712,7 @@ export async function deleteNode(
 	viewerEmailRaw: string,
 	id: string,
 ): Promise<void> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const access = await getNodeForViewer(viewerEmail, id);
+	const access = await getNodeForViewer(viewerEmailRaw, id);
 	if (!access || !access.canWrite) {
 		throw new Error("You do not have write access to this item.");
 	}
@@ -855,59 +722,20 @@ export async function deleteNode(
 
 	if (access.node.kind === "file") {
 		await deleteS3Object(s3Key);
-	} else {
-		const allObjects = await listAllS3Objects(s3Key);
-		for (const obj of allObjects) await deleteS3Object(obj.key);
-		await deleteS3Object(s3Key).catch(() => {});
+		return;
 	}
+
+	const allObjects = await listAllS3Objects(s3Key);
+	for (const obj of allObjects) {
+		await deleteS3Object(obj.key);
+	}
+	await deleteS3Object(s3Key).catch(() => {});
 }
 
-export async function shareNodeWithUser(
-	viewerEmailRaw: string,
-	nodeId: string,
-	granteeEmailRaw: string,
-	canWrite: boolean,
-): Promise<void> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const granteeEmail = normalizeEmail(granteeEmailRaw);
-
-	const virtualPath = decodeNodeId(nodeId);
-	if (!virtualPath) throw new Error("Invalid node ID.");
-
-	const segments = splitPath(virtualPath);
-	if (segments[0] !== "My Files") {
-		throw new Error("Only the owner can share items from My Files.");
-	}
-
-	const relSegments = segments.slice(1);
-	const isFolder = true; // share at folder level with prefix
-	const s3KeyPrefix = segmentsToS3Key(viewerEmail, relSegments, isFolder);
-	const nodeName = segments.at(-1)!;
-
-	// Determine kind
-	const fileKey = segmentsToS3Key(viewerEmail, relSegments, false);
-	const fileMeta = await headS3Object(fileKey);
-	const nodeKind: VirtualNodeKind = fileMeta ? "file" : "folder";
-	const actualPrefix = nodeKind === "file" ? fileKey : s3KeyPrefix;
-
-	const shares = await readSharesForGrantee(granteeEmail);
-	const existing = shares.findIndex(
-		(s) =>
-			normalizeEmail(s.ownerEmail) === viewerEmail && s.nodeName === nodeName,
+export async function shareNodeWithUser(): Promise<void> {
+	throw new Error(
+		"Item-level sharing is disabled. Use company access grants in Settings.",
 	);
-	const record: ShareRecord = {
-		id: existing >= 0 ? shares[existing].id : randomUUID(),
-		ownerEmail: viewerEmail,
-		s3KeyPrefix: actualPrefix,
-		nodeName,
-		nodeKind,
-		canWrite,
-		createdAt:
-			existing >= 0 ? shares[existing].createdAt : new Date().toISOString(),
-	};
-	if (existing >= 0) shares[existing] = record;
-	else shares.push(record);
-	await writeSharesForGrantee(granteeEmail, shares);
 }
 
 export async function moveNode(
@@ -915,31 +743,37 @@ export async function moveNode(
 	nodeId: string,
 	destinationPathRaw: string,
 ): Promise<void> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const access = await getNodeForViewer(viewerEmail, nodeId);
+	const access = await getNodeForViewer(viewerEmailRaw, nodeId);
 	if (!access || !access.canWrite) {
 		throw new Error("You do not have write access to move this item.");
 	}
 
-	const destSegments = splitPath(destinationPathRaw);
-	if (destSegments[0] !== "My Files") {
-		throw new Error("Moves are only supported inside My Files.");
+	const srcPath = decodeNodeId(nodeId);
+	if (!srcPath) throw new Error("Invalid source item.");
+
+	const srcSegments = splitPath(srcPath);
+	if (srcSegments.length < 2) {
+		throw new Error("Company roots cannot be moved.");
 	}
 
-	const newName = destSegments.at(-1);
-	if (!newName) throw new Error("Destination name is required.");
+	const dstSegments = splitPath(normalizeVirtualPath(destinationPathRaw));
+	if (dstSegments.length < 2) {
+		throw new Error("Destination must be inside a company folder.");
+	}
 
-	const srcPath = decodeNodeId(nodeId)!;
-	const srcSegments = splitPath(srcPath).slice(1); // remove 'My Files'
-	const dstSegments = destSegments.slice(1); // remove 'My Files'
+	const srcCompany = normalizeCompanyId(srcSegments[0]);
+	const dstCompany = normalizeCompanyId(dstSegments[0]);
+	const dstGrant = await getAccessGrant(viewerEmailRaw, dstCompany);
+	if (!dstGrant || !dstGrant.canWrite) {
+		throw new Error("You do not have write access to the destination company.");
+	}
 
-	const email = access.node.owner_email;
 	await moveSrcToDst(
-		email,
-		srcSegments,
+		srcCompany,
+		srcSegments.slice(1),
 		access.node.kind,
-		email,
-		dstSegments,
+		dstCompany,
+		dstSegments.slice(1),
 		"infinity",
 	);
 }
@@ -950,41 +784,53 @@ export async function copyNode(
 	destinationPathRaw: string,
 	options: CopyOptions,
 ): Promise<string> {
-	const viewerEmail = normalizeEmail(viewerEmailRaw);
-	const access = await getNodeForViewer(viewerEmail, sourceNodeId);
-	if (!access) throw new Error("Source item is not accessible.");
+	const source = await getNodeForViewer(viewerEmailRaw, sourceNodeId);
+	if (!source) throw new Error("Source item is not accessible.");
 
-	const destSegments = splitPath(destinationPathRaw);
-	if (destSegments[0] !== "My Files") {
-		throw new Error("COPY destination must be under My Files.");
+	const srcPath = decodeNodeId(sourceNodeId);
+	if (!srcPath) throw new Error("Invalid source item.");
+
+	const srcSegments = splitPath(srcPath);
+	if (srcSegments.length < 2) {
+		throw new Error("Company roots cannot be copied.");
 	}
 
-	const destName = destSegments.at(-1);
-	if (!destName) throw new Error("Destination path is invalid.");
+	const dstSegments = splitPath(normalizeVirtualPath(destinationPathRaw));
+	if (dstSegments.length < 2) {
+		throw new Error("Destination must be inside a company folder.");
+	}
 
-	const dstRelSegments = destSegments.slice(1);
+	const srcCompany = normalizeCompanyId(srcSegments[0]);
+	const dstCompany = normalizeCompanyId(dstSegments[0]);
+	const dstGrant = await getAccessGrant(viewerEmailRaw, dstCompany);
+	if (!dstGrant || !dstGrant.canWrite) {
+		throw new Error("You do not have write access to the destination company.");
+	}
+
+	const dstRelSegments = dstSegments.slice(1);
 	const dstKey =
-		access.node.kind === "file"
-			? segmentsToS3Key(viewerEmail, dstRelSegments, false)
-			: segmentsToS3Key(viewerEmail, dstRelSegments, true);
+		source.node.kind === "file"
+			? segmentsToS3Key(dstCompany, dstRelSegments, false)
+			: segmentsToS3Key(dstCompany, dstRelSegments, true);
 
 	if (options.overwrite) {
-		if (access.node.kind === "file") {
+		if (source.node.kind === "file") {
 			await deleteS3Object(dstKey).catch(() => {});
 		} else {
 			const existing = await listAllS3Objects(dstKey);
-			for (const obj of existing) await deleteS3Object(obj.key);
+			for (const obj of existing) {
+				await deleteS3Object(obj.key);
+			}
 		}
 	}
 
-	const srcPath = decodeNodeId(sourceNodeId)!;
-	const srcRelSegments = splitPath(srcPath).slice(1);
+	const srcRelSegments = srcSegments.slice(1);
 	const srcKey =
-		access.node.kind === "file"
-			? segmentsToS3Key(access.node.owner_email, srcRelSegments, false)
-			: segmentsToS3Key(access.node.owner_email, srcRelSegments, true);
+		source.node.kind === "file"
+			? segmentsToS3Key(srcCompany, srcRelSegments, false)
+			: segmentsToS3Key(srcCompany, srcRelSegments, true);
 
-	if (access.node.kind === "file") {
+	if (source.node.kind === "file") {
 		await copyS3Object(srcKey, dstKey);
 	} else {
 		await copyS3Object(srcKey, dstKey).catch(() => {});
@@ -997,6 +843,5 @@ export async function copyNode(
 		}
 	}
 
-	const virtualPath = `/My Files/${dstRelSegments.join("/")}`;
-	return makeNodeId(virtualPath);
+	return makeNodeId(`/${dstCompany}/${dstRelSegments.join("/")}`);
 }

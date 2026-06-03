@@ -243,5 +243,24 @@ jobs:
           fi
           echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
 
+      - name: Check database reachability from runner
+        run: |
+          DB_HOST=$(node -e "const u = new URL(process.env.DATABASE_URL); console.log(u.hostname)")
+          DB_PORT=$(node -e "const u = new URL(process.env.DATABASE_URL); console.log(u.port || '5432')")
+          echo "Checking TCP connectivity to ${DB_HOST}:${DB_PORT}"
+
+          if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}"; then
+            echo "DATABASE_REACHABLE=true" >> "$GITHUB_ENV"
+          else
+            echo "DATABASE_REACHABLE=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Run Prisma migrations
+        if: env.DATABASE_REACHABLE == 'true'
         run: npx prisma migrate deploy
+
+      - name: Skip migration when DB is private
+        if: env.DATABASE_REACHABLE != 'true'
+        run: |
+          echo "::warning::Skipping prisma migrate deploy because this runner cannot reach the database endpoint."
+          echo "::warning::Use a self-hosted runner inside the VPC (or run migration from a VPC-connected host) to apply pending migrations."

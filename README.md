@@ -61,6 +61,10 @@ What it does:
 4. Terraform plan/apply for infrastructure and app image update.
 5. Prisma migrations (`prisma migrate deploy`) using DATABASE_URL from AWS Secrets Manager.
 
+- The deploy workflow now checks DB reachability first.
+- If the GitHub-hosted runner cannot reach the DB endpoint (for private RDS), it logs a warning and skips migrations instead of failing the full deploy.
+- Apply migrations from a VPC-connected environment (for example, a self-hosted runner in the VPC or a workstation with network access).
+
 ### Required Repository Secrets
 
 - `AWS_DEPLOY_ROLE_ARN`

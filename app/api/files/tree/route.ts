@@ -188,7 +188,10 @@ export async function DELETE(request: Request) {
 	} catch (error) {
 		const url2 = new URL(request.url);
 		const nodeId = url2.searchParams.get("id")?.trim() || "(unknown)";
-		logger.error("api/files/tree", "DELETE failed", error, { email, id: nodeId });
+		logger.error("api/files/tree", "DELETE failed", error, {
+			email,
+			id: nodeId,
+		});
 		return NextResponse.json(
 			{ error: error instanceof Error ? error.message : "Delete failed." },
 			{ status: 500 },

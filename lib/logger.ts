@@ -34,10 +34,7 @@ function redactConnectionString(raw: string): string {
 
 function redactValue(value: unknown): unknown {
 	if (typeof value === "string") {
-		if (
-			value.startsWith("postgresql://") ||
-			value.startsWith("postgres://")
-		) {
+		if (value.startsWith("postgresql://") || value.startsWith("postgres://")) {
 			return redactConnectionString(value);
 		}
 		return value;
@@ -103,19 +100,11 @@ export const logger = {
 		}
 	},
 
-	info(
-		service: string,
-		message: string,
-		meta?: Record<string, unknown>,
-	): void {
+	info(service: string, message: string, meta?: Record<string, unknown>): void {
 		emit("info", service, message, meta);
 	},
 
-	warn(
-		service: string,
-		message: string,
-		meta?: Record<string, unknown>,
-	): void {
+	warn(service: string, message: string, meta?: Record<string, unknown>): void {
 		emit("warn", service, message, meta);
 	},
 

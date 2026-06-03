@@ -16,12 +16,14 @@ flowchart LR
     APP --> TF[AWS Transfer Family SFTP]
 
     subgraph Data
+      SF[shared_files]
       VF[virtual_files]
       FS[file_shares]
       AP[app_passwords]
       WL[webdav_locks]
     end
 
+    APP --> SF
     APP --> VF
     APP --> FS
     APP --> AP
@@ -36,10 +38,13 @@ Production URL: <https://d2i0sz4mcgor37.cloudfront.net>
 - Root dashboard redirects to `/uploads` via [app/(dashboard)/page.tsx](<app/(dashboard)/page.tsx>).
 - Auth: NextAuth with Cognito in production, dev credentials locally — [lib/auth.ts](lib/auth.ts).
 - File APIs:
+  - Shared files (list + upload): [app/api/files/route.ts](app/api/files/route.ts)
+  - Shared file download: [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)
   - Virtual file tree: [app/api/files/tree/route.ts](app/api/files/tree/route.ts)
   - Tree download: [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts)
   - WebDAV endpoint: [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)
   - App passwords: [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)
+  - Connection info (SFTP + WebDAV details): [app/api/settings/connection-info/route.ts](app/api/settings/connection-info/route.ts)
 - Prisma schema: [prisma/schema.prisma](prisma/schema.prisma). Migrations: [prisma/migrations](prisma/migrations).
 
 ### RBAC Model
@@ -213,21 +218,38 @@ npx prisma migrate deploy
 
 ## Project Paths
 
-| Path                                                                     | Purpose                     |
-| ------------------------------------------------------------------------ | --------------------------- |
-| [app](app)                                                               | All Next.js routes          |
-| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)       | Dashboard files UI          |
-| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)   | Dashboard uploads UI        |
-| [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>) | Settings / app passwords UI |
-| [app/login/page.tsx](app/login/page.tsx)                                 | Login page                  |
-| [lib/auth.ts](lib/auth.ts)                                               | NextAuth + Cognito config   |
-| [lib/files.ts](lib/files.ts)                                             | File access rules           |
-| [lib/virtual-files.ts](lib/virtual-files.ts)                             | Virtual file system logic   |
-| [lib/app-passwords.ts](lib/app-passwords.ts)                             | App password management     |
-| [lib/webdav-locks.ts](lib/webdav-locks.ts)                               | WebDAV lock support         |
-| [Dockerfile.lambda](Dockerfile.lambda)                                   | Lambda container image      |
-| [terraform/main.tf](terraform/main.tf)                                   | All AWS infrastructure      |
-| [prisma/schema.prisma](prisma/schema.prisma)                             | Database schema             |
-| [prisma/migrations](prisma/migrations)                                   | Migration history           |
-| [.github/workflows/deploy.yml](.github/workflows/deploy.yml)             | Full CI/CD deploy pipeline  |
-| [.github/workflows/ci.yml](.github/workflows/ci.yml)                     | PR-only CI gate             |
+| Path                                                                                   | Purpose                                              |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| [app](app)                                                                             | All Next.js routes                                   |
+| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)                     | Dashboard — virtual file tree UI                     |
+| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)                 | Dashboard — shared-file upload / inbox UI            |
+| [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>)               | Settings — app passwords + connection info           |
+| [app/upload/page.tsx](app/upload/page.tsx)                                             | Standalone file-share hub (outside dashboard layout) |
+| [app/login/page.tsx](app/login/page.tsx)                                               | Login page                                           |
+| [app/api/files/route.ts](app/api/files/route.ts)                                       | List / upload shared files                           |
+| [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)           | Download a shared file by ID                         |
+| [app/api/files/tree/route.ts](app/api/files/tree/route.ts)                             | Virtual file tree (CRUD + sharing)                   |
+| [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts) | Download a virtual-tree file by ID                   |
+| [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)                       | WebDAV endpoint                                      |
+| [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)     | App password CRUD                                    |
+| [app/api/settings/connection-info/route.ts](app/api/settings/connection-info/route.ts) | SFTP + WebDAV connection details                     |
+| [components/file-share-hub.tsx](components/file-share-hub.tsx)                         | Shared-files upload / download UI                    |
+| [components/file-manager-console.tsx](components/file-manager-console.tsx)             | Virtual file tree UI                                 |
+| [components/dashboard-sidebar.tsx](components/dashboard-sidebar.tsx)                   | Navigation sidebar                                   |
+| [lib/auth.ts](lib/auth.ts)                                                             | NextAuth + Cognito config                            |
+| [lib/files.ts](lib/files.ts)                                                           | Shared-file access rules                             |
+| [lib/virtual-files.ts](lib/virtual-files.ts)                                           | Virtual file system logic                            |
+| [lib/app-passwords.ts](lib/app-passwords.ts)                                           | App password management                              |
+| [lib/webdav-locks.ts](lib/webdav-locks.ts)                                             | WebDAV lock support                                  |
+| [lib/query-provider.tsx](lib/query-provider.tsx)                                       | TanStack Query client provider                       |
+| [lib/mock-data.ts](lib/mock-data.ts)                                                   | Mock data for local development                      |
+| [lib/observability.ts](lib/observability.ts)                                           | Metrics + tracing abstractions                       |
+| [lib/anomaly-detection.ts](lib/anomaly-detection.ts)                                   | Anomaly detection engine                             |
+| [lib/reconciliation.ts](lib/reconciliation.ts)                                         | Data reconciliation engine                           |
+| [lib/ingestion-validation.ts](lib/ingestion-validation.ts)                             | Ingestion validation rules engine                    |
+| [Dockerfile.lambda](Dockerfile.lambda)                                                 | Lambda container image                               |
+| [terraform/main.tf](terraform/main.tf)                                                 | All AWS infrastructure                               |
+| [prisma/schema.prisma](prisma/schema.prisma)                                           | Database schema                                      |
+| [prisma/migrations](prisma/migrations)                                                 | Migration history                                    |
+| [.github/workflows/deploy.yml](.github/workflows/deploy.yml)                           | Full CI/CD deploy pipeline                           |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml)                                   | PR-only CI gate                                      |

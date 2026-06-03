@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Folder,
 	FileText,
@@ -12,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -59,7 +60,7 @@ type DialogState =
 	| { type: "share"; entry: Entry };
 
 function formatSize(bytes: number) {
-	if (bytes === 0) return "â€”";
+	if (bytes === 0) return "—";
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	if (bytes < 1024 * 1024 * 1024)
@@ -68,9 +69,8 @@ function formatSize(bytes: number) {
 }
 
 export function FileManagerConsole() {
+	const queryClient = useQueryClient();
 	const [currentPath, setCurrentPath] = useState("/");
-	const [entries, setEntries] = useState<Entry[]>([]);
-	const [loading, setLoading] = useState(false);
 	const [status, setStatus] = useState<{
 		message: string;
 		error?: boolean;
@@ -87,33 +87,44 @@ export function FileManagerConsole() {
 
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
-	async function load(path: string) {
-		setLoading(true);
-		setStatus(null);
-		try {
+	const {
+		data: entries = [],
+		isFetching: loading,
+		error: loadError,
+	} = useQuery<Entry[]>({
+		queryKey: ["files-tree", currentPath],
+		queryFn: async () => {
 			const response = await fetch(
-				`/api/files/tree?path=${encodeURIComponent(path)}`,
+				`/api/files/tree?path=${encodeURIComponent(currentPath)}`,
 			);
 			const payload = (await response.json()) as {
 				entries?: Entry[];
 				error?: string;
 			};
 			if (!response.ok) throw new Error(payload.error ?? "Failed to load.");
-			setCurrentPath(path);
-			setEntries(payload.entries ?? []);
-		} catch (error) {
-			setStatus({
-				message: error instanceof Error ? error.message : "Failed to load.",
-				error: true,
-			});
-		} finally {
-			setLoading(false);
-		}
+			return payload.entries ?? [];
+		},
+	});
+
+	function navigate(path: string) {
+		setStatus(null);
+		setCurrentPath(path);
 	}
 
-	useEffect(() => {
-		void load("/");
-	}, []);
+	async function refresh() {
+		await queryClient.invalidateQueries({
+			queryKey: ["files-tree", currentPath],
+		});
+	}
+
+	// Surface query-level load errors into the status banner
+	if (loadError && (!status || !status.error)) {
+		setStatus({
+			message:
+				loadError instanceof Error ? loadError.message : "Failed to load.",
+			error: true,
+		});
+	}
 
 	const breadcrumbs = useMemo(() => {
 		const segments = currentPath.split("/").filter(Boolean);
@@ -172,7 +183,7 @@ export function FileManagerConsole() {
 			});
 		} else {
 			setStatus({ message: `Folder "${name}" created.` });
-			await load(currentPath);
+			await refresh();
 		}
 		closeDialog();
 	}
@@ -197,7 +208,7 @@ export function FileManagerConsole() {
 		if (!response.ok) {
 			setStatus({ message: payload.error ?? "Rename failed.", error: true });
 		} else {
-			await load(currentPath);
+			await refresh();
 		}
 		closeDialog();
 	}
@@ -216,7 +227,7 @@ export function FileManagerConsole() {
 		if (!response.ok) {
 			setStatus({ message: payload.error ?? "Delete failed.", error: true });
 		} else {
-			await load(currentPath);
+			await refresh();
 		}
 		closeDialog();
 	}
@@ -261,7 +272,7 @@ export function FileManagerConsole() {
 			xhr.onload = async () => {
 				setUploadProgress(null);
 				if (xhr.status >= 200 && xhr.status < 300) {
-					await load(currentPath);
+					await refresh();
 				} else {
 					setStatus({ message: "Upload failed.", error: true });
 				}
@@ -302,7 +313,7 @@ export function FileManagerConsole() {
 											<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
 										)}
 										<button
-											onClick={() => void load(crumb.path)}
+											onClick={() => navigate(crumb.path)}
 											className={
 												i === breadcrumbs.length - 1
 													? "font-medium text-foreground"
@@ -320,14 +331,14 @@ export function FileManagerConsole() {
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={() => void load("/My Files")}
+									onClick={() => navigate("/My Files")}
 								>
 									My Files
 								</Button>
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={() => void load("/Shared with Me")}
+									onClick={() => navigate("/Shared with Me")}
 								>
 									Shared with Me
 								</Button>
@@ -356,7 +367,7 @@ export function FileManagerConsole() {
 						{uploadProgress !== null && (
 							<div className="mt-3 space-y-1">
 								<p className="text-xs text-muted-foreground">
-									Uploadingâ€¦ {uploadProgress}%
+									Uploading… {uploadProgress}%
 								</p>
 								<div className="h-1.5 w-full rounded-full bg-muted">
 									<div
@@ -414,7 +425,7 @@ export function FileManagerConsole() {
 													className="flex items-center gap-2 text-left font-medium hover:underline"
 													onClick={() => {
 														if (entry.kind === "folder") {
-															void load(entry.virtualPath);
+															navigate(entry.virtualPath);
 														}
 													}}
 													disabled={entry.kind !== "folder"}
@@ -445,7 +456,7 @@ export function FileManagerConsole() {
 											<TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
 												{entry.kind === "file"
 													? formatSize(entry.sizeBytes)
-													: "â€”"}
+													: "—"}
 											</TableCell>
 											<TableCell className="pr-4">
 												<DropdownMenu>
@@ -474,7 +485,7 @@ export function FileManagerConsole() {
 															Rename
 														</DropdownMenuItem>
 														<DropdownMenuItem onClick={() => openShare(entry)}>
-															Shareâ€¦
+															Share…
 														</DropdownMenuItem>
 														<DropdownMenuSeparator />
 														<DropdownMenuItem

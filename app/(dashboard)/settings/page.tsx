@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -81,16 +82,40 @@ function CopyField({
 }
 
 export default function SettingsPage() {
-	const [conn, setConn] = useState<ConnectionInfo>({
-		sftpEndpoint: "",
-		sftpUsername: "",
-		webdavUrl: "",
-		userEmail: "",
-	});
-	const [passwords, setPasswords] = useState<AppPassword[]>([]);
+	const queryClient = useQueryClient();
 	const [label, setLabel] = useState("");
 	const [newToken, setNewToken] = useState("");
 	const [passwordStatus, setPasswordStatus] = useState("");
+
+	const {
+		data: conn = {
+			sftpEndpoint: "",
+			sftpUsername: "",
+			webdavUrl: "",
+			userEmail: "",
+		},
+	} = useQuery<ConnectionInfo>({
+		queryKey: ["connection-info"],
+		queryFn: async () => {
+			const response = await fetch("/api/settings/connection-info");
+			if (!response.ok) throw new Error("Failed to load connection info.");
+			return response.json() as Promise<ConnectionInfo>;
+		},
+	});
+
+	const { data: passwords = [] } = useQuery<AppPassword[]>({
+		queryKey: ["app-passwords"],
+		queryFn: async () => {
+			const response = await fetch("/api/settings/app-passwords");
+			const payload = (await response.json()) as {
+				passwords?: AppPassword[];
+				error?: string;
+			};
+			if (!response.ok)
+				throw new Error(payload.error ?? "Failed to load passwords.");
+			return payload.passwords ?? [];
+		},
+	});
 
 	// webDavHost for the Windows UNC path fallback
 	const webDavHost = conn.webdavUrl
@@ -107,27 +132,8 @@ export default function SettingsPage() {
 			: "";
 
 	async function loadPasswords() {
-		const response = await fetch("/api/settings/app-passwords");
-		const payload = (await response.json()) as {
-			passwords?: AppPassword[];
-			error?: string;
-		};
-		if (response.ok) {
-			setPasswords(payload.passwords ?? []);
-		}
+		await queryClient.invalidateQueries({ queryKey: ["app-passwords"] });
 	}
-
-	async function loadConnectionInfo() {
-		const response = await fetch("/api/settings/connection-info");
-		if (!response.ok) return;
-		const payload = (await response.json()) as ConnectionInfo;
-		setConn(payload);
-	}
-
-	useEffect(() => {
-		void loadConnectionInfo();
-		void loadPasswords();
-	}, []);
 
 	async function createPassword() {
 		const trimmed = label.trim();

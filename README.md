@@ -160,7 +160,7 @@ GitHub repository variables required by [deploy.yml](.github/workflows/deploy.ym
 
 - App shell and portal routes: [app](app)
 - Login page: [app/login/page.tsx](app/login/page.tsx)
-- File portal UI: [app/(dashboard)/uploads/page.tsx](app/(dashboard)/uploads/page.tsx)
+- File portal UI: [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)
 - File APIs: [app/api/files/route.ts](app/api/files/route.ts), [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)
 - Role/file access rules: [lib/files.ts](lib/files.ts)
 - Auth configuration: [lib/auth.ts](lib/auth.ts)

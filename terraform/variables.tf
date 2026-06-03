@@ -108,14 +108,6 @@ variable "app_public_url" {
   type        = string
 }
 
-# ---------- Transfer Family ----------
-
-variable "transfer_users" {
-  description = "Map of SFTP username to SSH public key. Each user is isolated to /{bucket}/clients/{username}/. Add a client by adding an entry here and running terraform apply."
-  type        = map(string)
-  default     = {}
-}
-
 # ---------- Observability ----------
 
 variable "log_retention_days" {

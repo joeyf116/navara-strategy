@@ -185,106 +185,43 @@ No database migration step is needed.
 
 ---
 
-## Managing SFTP Users
+## Managing Clients (SFTP + Web Portal)
 
-AWS Transfer Family is the **primary** interface. Clients upload files via SFTP; the web app is a secondary view for clients to see shared files and for you (super admin) to share files with them.
+Clients use **one set of credentials** for everything:
 
-### How SFTP maps to the web app
+| Access method | Username | Password/Key          |
+| ------------- | -------- | --------------------- |
+| Web portal    | Email    | Cognito password      |
+| SFTP          | Email    | Same Cognito password |
 
-Each SFTP user is chrooted to their home directory in S3:
+A small Lambda (`terraform/sftp-auth/index.mjs`) sits between Transfer Family and Cognito. When a client connects via SFTP, Transfer Family calls the Lambda, which validates the password against Cognito and returns the correct S3 home directory. No SSH keys, no separate SFTP user accounts to maintain.
+
+Each client's files live at:
 
 ```
-s3://{bucket}/clients/{sftp-username}/
+s3://{bucket}/clients/{sanitized-email}/
+# e.g. client@acme.com → clients/client-acme-com/
 ```
 
-SFTP access and web portal access are **provisioned separately** and linked only by the files in S3:
+To give a user a custom folder name (e.g. a shared company bucket), set the `custom:sftp_folder` attribute on their Cognito account — the Lambda will use it in preference to the derived name.
 
-- **SFTP** uses an SSH key — managed via Terraform tfvars or the AWS Console
-- **Web portal** uses a Cognito username + password — managed via the AWS CLI or Console
+### Adding a new client
 
-### Adding a new client (full onboarding)
-
-This provisions both SFTP access and web portal access for a client.
-
----
-
-#### Step 1 — Generate an SSH key pair for the client
-
-You generate the key pair and send the client both files, **or** the client generates it and sends you only the `.pub` file (more secure — they never share the private key).
-
-To generate on the client's behalf:
+**Step 1 — Create their Cognito account:**
 
 ```bash
-ssh-keygen -t ed25519 -C "client-name" -f client-name_ed25519
-# client-name_ed25519      ← private key (send to client securely)
-# client-name_ed25519.pub  ← public key  (you keep this)
-```
-
----
-
-#### Step 2 — Provision the SFTP user
-
-**Option A — Terraform (recommended, tracked in git):**
-
-Add an entry to `terraform/terraform.tfvars`:
-
-```hcl
-transfer_users = {
-  "existing-client" = "ssh-ed25519 AAAA..."
-  "new-client-name" = "ssh-ed25519 AAAA... (paste their public key here)"
-}
-```
-
-Username rules: alphanumeric + hyphens, 3–100 characters, no `@` or spaces.
-
-```bash
-git add terraform/terraform.tfvars
-git commit -m "Add SFTP user: new-client-name"
-git push
-```
-
-The pipeline applies Terraform, creating the Transfer Family user and SSH key automatically.
-
-**Option B — AWS Console (fast, no git commit required):**
-
-1. Open [AWS Transfer Family](https://console.aws.amazon.com/transfer/) → select your server → **Users** tab → **Add user**
-2. Set **Username** (match whatever you'll put in tfvars later)
-3. **Access** → select the `navara-sftp-transfer-user` IAM role
-4. **Home directory** → Restricted → bucket `navara-sftp-911788523695`, folder `clients/new-client-name`
-5. Paste the client's public key under **SSH public keys**
-6. Save
-
-> **Important:** Users created in the Console are invisible to Terraform. To prevent the next `terraform apply` from deleting them, add the same entry to `terraform.tfvars` and push. Until then, avoid running `terraform apply` or use `-target` flags that exclude the Transfer Family user resources.
-
----
-
-#### Step 3 — Create the client's web portal account (Cognito)
-
-The web app authenticates via Cognito. Create a user account so the client can log in:
-
-```bash
-# Get your pool ID first
 POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
-
-# Replace: client@example.com with the client's email
-# Replace: TempPass123! with a strong temporary password you choose
 
 aws cognito-idp admin-create-user \
   --user-pool-id $POOL_ID \
   --username client@example.com \
   --temporary-password "TempPass123!" \
-  --user-attributes Name=email,Value=client@example.com Name=email_verified,Value=true \
+  --user-attributes \
+    Name=email,Value=client@example.com \
+    Name=email_verified,Value=true \
   --message-action SUPPRESS \
   --region us-east-1 \
   --profile joey-navara
-```
-
-`--message-action SUPPRESS` skips the Cognito welcome email so you control how credentials are delivered.
-
-Then add the user to the `tenant_user` group (gives them client-level access in the app):
-
-```bash
-POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
 
 aws cognito-idp admin-add-user-to-group \
   --user-pool-id $POOL_ID \
@@ -294,45 +231,57 @@ aws cognito-idp admin-add-user-to-group \
   --profile joey-navara
 ```
 
-> You can also do both steps in **AWS Console → Cognito → User Pools → your pool → Users → Create user**.
+`--message-action SUPPRESS` skips the Cognito welcome email so you control how credentials are delivered.
 
----
+> You can also do this in **AWS Console → Cognito → User Pools → your pool → Users → Create user**.
 
-#### Step 4 — Send the client their credentials
+**Step 2 — (Optional) Set a custom S3 folder:**
 
-Send via email or a secure channel:
+Skip this if the derived name (`client-example-com`) is fine. Set it if you want a specific folder name (e.g. for a company):
+
+```bash
+# First add the custom attribute to the user pool (one-time, per pool):
+aws cognito-idp add-custom-attributes \
+  --user-pool-id $POOL_ID \
+  --custom-attributes Name=sftp_folder,AttributeDataType=String,Mutable=true \
+  --region us-east-1 --profile joey-navara
+
+# Then set it on the user:
+aws cognito-idp admin-update-user-attributes \
+  --user-pool-id $POOL_ID \
+  --username client@example.com \
+  --user-attributes Name=custom:sftp_folder,Value=clients/acme-corp \
+  --region us-east-1 --profile joey-navara
+```
+
+**Step 3 — Send the client their credentials:**
 
 ```
-=== SFTP Access ===
-Host:      (from: terraform output sftp_endpoint)
-Port:      22
-Username:  new-client-name
-Auth:      SSH private key (attached)
-
-=== Web Portal ===
-URL:       https://d2i0sz4mcgor37.cloudfront.net
-Email:     client@example.com
-Password:  TempPass123!  ← you will be prompted to set a new password on first login
+Web portal: https://d2i0sz4mcgor37.cloudfront.net
+SFTP host:  (from: terraform output sftp_endpoint)
+SFTP port:  22
+Username:   client@example.com     ← same for both web and SFTP
+Password:   TempPass123!           ← prompted to set permanent password on first web login
 ```
 
-The client logs in at the web portal URL, enters their email and temporary password, and Cognito immediately prompts them to set a permanent password.
+The client must log into the web portal first to set their permanent password before SFTP will work. If they try SFTP with the temporary password, the Lambda denies them (Cognito returns a NEW_PASSWORD_REQUIRED challenge, which cannot be completed over SFTP).
 
----
+### Resetting a client's password
 
-### Rotating a client's SSH key
+```bash
+POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
 
-1. Generate a new key pair (or have the client generate one)
-2. **Terraform:** update the value in `terraform.tfvars` and push
-3. **Console:** go to Transfer Family → server → user → **SSH public keys** → delete old, add new
+aws cognito-idp admin-set-user-password \
+  --user-pool-id $POOL_ID \
+  --username client@example.com \
+  --password "NewTempPass456!" \
+  --no-permanent \
+  --region us-east-1 --profile joey-navara
+```
 
-> There is a brief window during Terraform apply where the old key is removed before the new one is added. Schedule during low-traffic hours if needed.
+`--no-permanent` forces them to set a new password on next web portal login. Alternatively use `--permanent` to set a final password directly without requiring a change.
 
 ### Removing a client
-
-**Terraform:**
-
-1. Delete the entry from `terraform/terraform.tfvars` and push
-2. Delete the Cognito user:
 
 ```bash
 POOL_ID=$(terraform -chdir=terraform output -raw cognito_user_pool_id)
@@ -343,26 +292,18 @@ aws cognito-idp admin-delete-user \
   --region us-east-1 --profile joey-navara
 ```
 
-**Console:** Transfer Family → server → Users → select user → **Delete**. Then Cognito → User Pools → Users → select user → **Delete user**.
+Deleting the Cognito user immediately revokes both web portal and SFTP access — there are no separate SSH keys or Transfer Family users to clean up.
 
-> Their S3 files remain at `s3://{bucket}/clients/{username}/`. Delete them manually if required:
+> Their S3 files remain at `s3://navara-sftp-911788523695/clients/{folder}/`. Delete manually if required:
 >
 > ```bash
-> aws s3 rm s3://navara-sftp-911788523695/clients/client-name/ --recursive --profile joey-navara
+> aws s3 rm s3://navara-sftp-911788523695/clients/client-example-com/ --recursive --profile joey-navara
 > ```
 
-### Checking active users
+### Listing active clients
 
 ```bash
-# SFTP users (Terraform-managed)
-terraform -chdir=terraform output sftp_usernames
-
-# All SFTP users including Console-created ones
-aws transfer list-users \
-  --server-id $(terraform -chdir=terraform output -raw sftp_endpoint | cut -d. -f1 | sed 's/s-//') \
-  --region us-east-1 --profile joey-navara
-
-# Cognito / web portal users
+# All Cognito users (web portal + SFTP)
 aws cognito-idp list-users \
   --user-pool-id $(terraform -chdir=terraform output -raw cognito_user_pool_id) \
   --region us-east-1 --profile joey-navara
@@ -370,17 +311,24 @@ aws cognito-idp list-users \
 
 ### Viewing a client's files (admin)
 
-All client uploads land in S3. You can browse or download them directly:
-
 ```bash
-# List a client's uploaded files
-aws s3 ls s3://{bucket}/clients/{username}/ --profile joey-navara
+# List
+aws s3 ls s3://navara-sftp-911788523695/clients/client-example-com/ --profile joey-navara
 
-# Copy a file out
-aws s3 cp s3://{bucket}/clients/{username}/report.pdf ./report.pdf --profile joey-navara
+# Download
+aws s3 cp s3://navara-sftp-911788523695/clients/client-example-com/report.pdf ./report.pdf --profile joey-navara
 ```
 
 You can also share files with clients through the web portal (admin dashboard → uploads tab).
+
+### Migrating the existing `client-upload` SFTP user
+
+The previous `client-upload` user authenticated via SSH key. To migrate:
+
+1. Create a Cognito account for their email address (Step 1 above)
+2. Set `custom:sftp_folder = clients/client-upload` so their existing S3 files are preserved (Step 2 above)
+3. Send them their new credentials — they now use email + password instead of an SSH key
+4. Their SFTP host will change (the Transfer Family server was recreated when switching identity providers) — send them the new host from `terraform output sftp_endpoint`
 
 ---
 

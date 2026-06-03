@@ -128,6 +128,20 @@ resource "aws_cognito_user_pool_domain" "this" {
   user_pool_id = aws_cognito_user_pool.this.id
 }
 
+# Separate app client used only by the SFTP auth Lambda (server-side, no secret needed).
+# Uses ADMIN_USER_PASSWORD_AUTH so the Lambda can validate credentials on behalf of the user.
+resource "aws_cognito_user_pool_client" "sftp_auth" {
+  name         = "${var.project_name}-sftp-auth"
+  user_pool_id = aws_cognito_user_pool.this.id
+
+  generate_secret = false
+
+  explicit_auth_flows = [
+    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+  ]
+}
+
 # -----------------------------------------------------------------------------
 # Secrets Manager
 # -----------------------------------------------------------------------------
@@ -327,7 +341,7 @@ resource "aws_s3_bucket_cors_configuration" "transfer" {
 }
 
 # -----------------------------------------------------------------------------
-# AWS Transfer Family (SFTP)
+# AWS Transfer Family (SFTP) — custom Lambda identity provider
 # -----------------------------------------------------------------------------
 
 resource "aws_iam_role" "transfer_logging" {
@@ -354,15 +368,8 @@ resource "aws_iam_role_policy_attachment" "transfer_logging" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSTransferLoggingAccess"
 }
 
-resource "aws_transfer_server" "this" {
-  identity_provider_type = "SERVICE_MANAGED"
-  protocols              = ["SFTP"]
-  endpoint_type          = "PUBLIC"
-  logging_role           = aws_iam_role.transfer_logging.arn
-
-  tags = local.common_tags
-}
-
+# IAM role assumed by Transfer Family on behalf of each authenticated user.
+# The SFTP auth Lambda returns this role ARN in its response.
 resource "aws_iam_role" "transfer_user" {
   name = "${var.project_name}-transfer-user"
 
@@ -390,10 +397,8 @@ resource "aws_iam_role_policy" "transfer_user" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = [
-          "s3:ListBucket"
-        ]
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.transfer.arn
       },
       {
@@ -409,26 +414,96 @@ resource "aws_iam_role_policy" "transfer_user" {
   })
 }
 
-resource "aws_transfer_user" "clients" {
-  for_each  = var.transfer_users
-  server_id = aws_transfer_server.this.id
-  user_name = each.key
-  role      = aws_iam_role.transfer_user.arn
+# IAM role for the SFTP auth Lambda
+resource "aws_iam_role" "sftp_auth_lambda" {
+  name = "${var.project_name}-sftp-auth-lambda"
 
-  home_directory_type = "LOGICAL"
-  home_directory_mappings {
-    entry  = "/"
-    target = "/${aws_s3_bucket.transfer.bucket}/clients/${each.key}"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "sftp_auth_basic" {
+  role       = aws_iam_role.sftp_auth_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "sftp_auth_lambda" {
+  name = "${var.project_name}-sftp-auth-lambda-policy"
+  role = aws_iam_role.sftp_auth_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "CognitoAdminAuth"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminInitiateAuth",
+          "cognito-idp:AdminGetUser",
+        ]
+        Resource = aws_cognito_user_pool.this.arn
+      }
+    ]
+  })
+}
+
+# Package the SFTP auth Lambda from source
+data "archive_file" "sftp_auth" {
+  type        = "zip"
+  source_file = "${path.module}/sftp-auth/index.mjs"
+  output_path = "${path.module}/sftp-auth.zip"
+}
+
+resource "aws_lambda_function" "sftp_auth" {
+  function_name    = "${var.project_name}-sftp-auth"
+  role             = aws_iam_role.sftp_auth_lambda.arn
+  runtime          = "nodejs22.x"
+  handler          = "index.handler"
+  filename         = data.archive_file.sftp_auth.output_path
+  source_code_hash = data.archive_file.sftp_auth.output_base64sha256
+  timeout          = 10
+
+  environment {
+    variables = {
+      COGNITO_USER_POOL_ID   = aws_cognito_user_pool.this.id
+      COGNITO_CLIENT_ID      = aws_cognito_user_pool_client.sftp_auth.id
+      TRANSFER_USER_ROLE_ARN = aws_iam_role.transfer_user.arn
+      S3_BUCKET              = aws_s3_bucket.transfer.bucket
+    }
   }
 
   tags = local.common_tags
 }
 
-resource "aws_transfer_ssh_key" "clients" {
-  for_each  = var.transfer_users
-  server_id = aws_transfer_server.this.id
-  user_name = aws_transfer_user.clients[each.key].user_name
-  body      = each.value
+# Allow Transfer Family to invoke the auth Lambda
+resource "aws_lambda_permission" "transfer_invoke_sftp_auth" {
+  statement_id  = "AllowTransferFamilyInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.sftp_auth.function_name
+  principal     = "transfer.amazonaws.com"
+  source_arn    = aws_transfer_server.this.arn
+}
+
+resource "aws_transfer_server" "this" {
+  identity_provider_type = "AWS_LAMBDA"
+  function               = aws_lambda_function.sftp_auth.arn
+  protocols              = ["SFTP"]
+  endpoint_type          = "PUBLIC"
+  logging_role           = aws_iam_role.transfer_logging.arn
+
+  tags = local.common_tags
 }
 
 # -----------------------------------------------------------------------------

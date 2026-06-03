@@ -170,6 +170,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: |
@@ -187,6 +188,8 @@ jobs:
         run: |
           set +e
           terraform plan \
+            -input=false \
+            -no-color \
             -var="app_image_identifier=${{ needs.build-push.outputs.image_uri }}" \
             -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}" \
             -var="cognito_domain=${{ env.COGNITO_DOMAIN }}" \
@@ -196,21 +199,35 @@ jobs:
             -out=tfplan \
             -detailed-exitcode
           EXIT_CODE=$?
+          set -e
+
           echo "exitcode=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+
+          if [ "$EXIT_CODE" -eq 2 ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          elif [ "$EXIT_CODE" -eq 0 ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
           if [ "$EXIT_CODE" -eq 1 ]; then
             exit 1
           fi
 
+      - name: Plan gate debug
+        run: |
+          echo "Terraform detailed exit code: ${{ steps.plan.outputs.exitcode }}"
+          echo "Terraform has_changes: ${{ steps.plan.outputs.has_changes }}"
+
       - name: Terraform Apply
-        if: steps.plan.outputs.exitcode == '2'
+        if: ${{ steps.plan.outputs.has_changes == 'true' }}
         run: terraform apply -auto-approve -input=false tfplan
 
       - name: No-op (plan detected no changes)
-        if: steps.plan.outputs.exitcode == '0'
+        if: ${{ steps.plan.outputs.has_changes == 'false' }}
         run: echo "Terraform plan detected no infrastructure changes — apply skipped."
 
       - name: Show App URL
-        if: steps.plan.outputs.exitcode == '0' || steps.plan.outputs.exitcode == '2'
+        if: ${{ steps.plan.outputs.exitcode == '0' || steps.plan.outputs.exitcode == '2' }}
         run: |
           terraform output app_url
 

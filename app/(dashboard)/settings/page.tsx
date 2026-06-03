@@ -19,6 +19,12 @@ export default function SettingsPage() {
 	const [label, setLabel] = useState("");
 	const [newToken, setNewToken] = useState("");
 	const [status, setStatus] = useState("");
+	const [origin, setOrigin] = useState("");
+
+	const webDavEndpoint = origin
+		? `${origin}/api/dav`
+		: "https://your-domain.com/api/dav";
+	const webDavHost = origin ? new URL(origin).host : "your-domain.com";
 
 	async function load() {
 		const response = await fetch("/api/settings/app-passwords");
@@ -37,6 +43,7 @@ export default function SettingsPage() {
 
 	useEffect(() => {
 		const id = window.setTimeout(() => {
+			setOrigin(window.location.origin);
 			void load();
 		}, 0);
 
@@ -94,9 +101,28 @@ export default function SettingsPage() {
 			<div>
 				<h1 className="text-2xl font-bold">Network Drive Settings</h1>
 				<p className="text-muted-foreground">
-					Generate app passwords for Basic Auth over WebDAV at /api/dav.
+					AWS Transfer Family (SFTP) is the primary file-sharing path. Use
+					WebDAV below for desktop file explorer access.
 				</p>
 			</div>
+
+			<Card>
+				<CardHeader>
+					<CardTitle>Primary File Share Path (AWS Transfer Family)</CardTitle>
+				</CardHeader>
+				<CardContent className="space-y-2 text-sm text-muted-foreground">
+					<p>Production file exchange is backed by AWS Transfer Family SFTP.</p>
+					<p>
+						Use Terraform outputs to confirm the active endpoint and username.
+					</p>
+					<p className="font-mono text-xs text-foreground">
+						terraform output sftp_endpoint
+					</p>
+					<p className="font-mono text-xs text-foreground">
+						terraform output sftp_username
+					</p>
+				</CardContent>
+			</Card>
 
 			<Card>
 				<CardHeader>
@@ -169,10 +195,38 @@ export default function SettingsPage() {
 				<CardHeader>
 					<CardTitle>Connect OS File Explorer</CardTitle>
 				</CardHeader>
-				<CardContent className="space-y-2 text-sm text-muted-foreground">
-					<p>Endpoint: https://your-domain.com/api/dav</p>
+				<CardContent className="space-y-3 text-sm text-muted-foreground">
+					<p className="font-medium text-foreground">Connection values</p>
+					<p>
+						WebDAV URL: <span className="font-mono">{webDavEndpoint}</span>
+					</p>
 					<p>Username: your account email</p>
 					<p>Password: app password token generated above</p>
+					<p className="font-medium text-foreground">Windows (File Explorer)</p>
+					<p>
+						Open File Explorer - This PC - Map network drive - Connect to a web
+						site.
+					</p>
+					<p>
+						Use this folder URL:{" "}
+						<span className="font-mono">{webDavEndpoint}</span>
+					</p>
+					<p>
+						If prompted for a UNC path, use{" "}
+						<span className="font-mono">
+							{`\\\\${webDavHost}@SSL\\DavWWWRoot\\api\\dav`}
+						</span>
+						.
+					</p>
+					<p className="font-medium text-foreground">macOS (Finder)</p>
+					<p>
+						Open Finder - Go - Connect to Server, then enter{" "}
+						<span className="font-mono">{webDavEndpoint}</span>.
+					</p>
+					<p>
+						Sign in with Registered User, using your account email and app
+						password token.
+					</p>
 				</CardContent>
 			</Card>
 		</div>

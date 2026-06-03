@@ -62,3 +62,8 @@ output "lambda_function_arn" {
   value       = aws_lambda_function.web.arn
   description = "Lambda function ARN"
 }
+
+output "cognito_user_pool_id" {
+  value       = aws_cognito_user_pool.this.id
+  description = "Cognito User Pool ID — used when creating/deleting web portal users via CLI"
+}

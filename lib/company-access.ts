@@ -160,6 +160,30 @@ function getPoolIdFromIssuer(): string | null {
 	}
 }
 
+function escapeCognitoFilter(value: string): string {
+	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function findCognitoUsernameByEmail(
+	poolId: string,
+	emailRaw: string,
+): Promise<string | null> {
+	const email = normalizeEmail(emailRaw);
+	if (!email) return null;
+
+	const response = await cognitoClient.send(
+		new ListUsersCommand({
+			UserPoolId: poolId,
+			Limit: 1,
+			Filter: `email = "${escapeCognitoFilter(email)}"`,
+		}),
+	);
+
+	const user = response.Users?.[0];
+	const username = String(user?.Username ?? "").trim();
+	return username || null;
+}
+
 async function readCognitoAccess(emailRaw: string): Promise<UserCompanyAccess> {
 	const poolId = getPoolIdFromIssuer();
 	const email = normalizeEmail(emailRaw);
@@ -167,17 +191,33 @@ async function readCognitoAccess(emailRaw: string): Promise<UserCompanyAccess> {
 		return { isSuperAdmin: false, grants: [] };
 	}
 
+	let username = email;
+	try {
+		await cognitoClient.send(
+			new AdminGetUserCommand({
+				UserPoolId: poolId,
+				Username: username,
+			}),
+		);
+	} catch {
+		const resolved = await findCognitoUsernameByEmail(poolId, email);
+		if (!resolved) {
+			return { isSuperAdmin: false, grants: [] };
+		}
+		username = resolved;
+	}
+
 	const [user, groups] = await Promise.all([
 		cognitoClient.send(
 			new AdminGetUserCommand({
 				UserPoolId: poolId,
-				Username: email,
+				Username: username,
 			}),
 		),
 		cognitoClient.send(
 			new AdminListGroupsForUserCommand({
 				UserPoolId: poolId,
-				Username: email,
+				Username: username,
 			}),
 		),
 	]);

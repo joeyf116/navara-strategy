@@ -25,16 +25,18 @@ const ssl =
 					process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false",
 				...(process.env.DATABASE_CA_CERT
 					? {
-							ca: Buffer.from(
-								process.env.DATABASE_CA_CERT,
-								"base64",
-							).toString("utf8"),
+							ca: Buffer.from(process.env.DATABASE_CA_CERT, "base64").toString(
+								"utf8",
+							),
 						}
 					: {}),
 			}
 		: undefined;
 
-const adapter = new PrismaPg({ connectionString: resolvedConnectionString, ssl });
+const adapter = new PrismaPg({
+	connectionString: resolvedConnectionString,
+	ssl,
+});
 
 export const prisma =
 	global.__prisma ??

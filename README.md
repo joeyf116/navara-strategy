@@ -15,37 +15,23 @@ flowchart LR
     APP --> S3[(S3 Bucket)]
     APP --> TF[AWS Transfer Family SFTP]
 
-    subgraph Data
-      SF[shared_files]
-      VF[virtual_files]
-      FS[file_shares]
-      AP[app_passwords]
-      WL[webdav_locks]
+    subgraph RDS Tables
+      RDS --> SF[shared_files]
+      RDS --> VF[virtual_files]
+      RDS --> FS[file_shares]
+      RDS --> AP[app_passwords]
+      RDS --> WL[webdav_locks]
     end
-
-    APP --> SF
-    APP --> VF
-    APP --> FS
-    APP --> AP
-    APP --> WL
 ```
 
 Production URL: <https://d2i0sz4mcgor37.cloudfront.net>
 
 ### Runtime Components
 
-- UI routes: [app](app). Authenticated dashboard routes under [app/(dashboard)](<app/(dashboard)>).
-- Root dashboard redirects to `/uploads` via [app/(dashboard)/page.tsx](<app/(dashboard)/page.tsx>).
-- Auth: NextAuth with Cognito in production, dev credentials locally — [lib/auth.ts](lib/auth.ts).
-- File APIs:
-  - Shared files (list + upload): [app/api/files/route.ts](app/api/files/route.ts)
-  - Shared file download: [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)
-  - Virtual file tree: [app/api/files/tree/route.ts](app/api/files/tree/route.ts)
-  - Tree download: [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts)
-  - WebDAV endpoint: [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)
-  - App passwords: [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)
-  - Connection info (SFTP + WebDAV details): [app/api/settings/connection-info/route.ts](app/api/settings/connection-info/route.ts)
-- Prisma schema: [prisma/schema.prisma](prisma/schema.prisma). Migrations: [prisma/migrations](prisma/migrations).
+- UI routes: [app](app). Authenticated dashboard at [app/(dashboard)](<app/(dashboard)>); unauthenticated share hub at [app/upload](app/upload).
+- Auth: NextAuth backed by Cognito in production; dev credentials used locally. Config: [lib/auth.ts](lib/auth.ts).
+- File APIs: REST endpoints under `app/api/files/` (shared files + virtual tree), WebDAV at `app/api/dav/`, and settings at `app/api/settings/`. See [Project Paths](#project-paths) for the full breakdown.
+- Database: Prisma ORM — schema at [prisma/schema.prisma](prisma/schema.prisma).
 
 ### RBAC Model
 
@@ -118,29 +104,24 @@ push to main
 
 ### Required Repository Variables
 
-| Variable                 | Production Value                                                                                                        |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `AWS_REGION`             | `us-east-1`                                                                                                             |
-| `ECR_REPOSITORY`         | `navara-sftp`                                                                                                           |
-| `TF_STATE_BUCKET`        | `navara-sftp-terraform-state`                                                                                           |
-| `TF_STATE_KEY`           | `production/terraform.tfstate`                                                                                          |
-| `TF_LOCK_TABLE`          | `navara-sftp-terraform-locks`                                                                                           |
-| `COGNITO_DOMAIN`         | `navara-sftp-911788523695`                                                                                              |
-| `APP_PUBLIC_URL`         | `https://d2i0sz4mcgor37.cloudfront.net`                                                                                 |
-| `COGNITO_CALLBACK_URLS`  | `["https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]` |
-| `COGNITO_LOGOUT_URLS`    | `["https://d2i0sz4mcgor37.cloudfront.net/login","http://localhost:3000/login"]`                                         |
-| `DATABASE_URL_SECRET_ID` | `navara-sftp/database-url` _(optional, this is the default)_                                                            |
-
-Set these as repository **secrets**:
-
-```
-AWS_DEPLOY_ROLE_ARN=<your-github-oidc-deploy-role-arn>
-SFTP_USER_PUBLIC_KEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBwGGCfbU7p8aNMsmkANy57L3qCNbt1vWlJUfJys1o/r navara-sftp-client
-```
+| Variable                 | Production Value                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `AWS_REGION`             | `us-east-1`                                                                                                                  |
+| `ECR_REPOSITORY`         | `navara-sftp`                                                                                                                |
+| `TF_STATE_BUCKET`        | `navara-sftp-terraform-state`                                                                                                |
+| `TF_STATE_KEY`           | `production/terraform.tfstate`                                                                                               |
+| `TF_LOCK_TABLE`          | `navara-sftp-terraform-locks`                                                                                                |
+| `COGNITO_DOMAIN`         | `navara-sftp-<account-id>`                                                                                                   |
+| `APP_PUBLIC_URL`         | `https://<your-distribution>.cloudfront.net`                                                                                 |
+| `COGNITO_CALLBACK_URLS`  | `["https://<your-distribution>.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]` |
+| `COGNITO_LOGOUT_URLS`    | `["https://<your-distribution>.cloudfront.net/login","http://localhost:3000/login"]`                                         |
+| `DATABASE_URL_SECRET_ID` | `navara-sftp/database-url` _(optional, this is the default)_                                                                 |
 
 ---
 
 ## First-Time Bootstrap
+
+> **Prerequisites:** The Terraform state S3 bucket and DynamoDB lock table must exist before `terraform init`. Create them once manually via the AWS console or CLI, then Terraform manages everything else.
 
 The OIDC IAM role that GitHub Actions uses is itself managed by Terraform. Bootstrap once from a workstation with AWS credentials:
 
@@ -159,8 +140,6 @@ terraform apply `
 ```
 
 Copy the `github_actions_deploy_role_arn` output and set it as the `AWS_DEPLOY_ROLE_ARN` repository secret. All subsequent deploys run fully automated via push to `main`.
-
-> The Terraform state S3 bucket and DynamoDB lock table must exist before `terraform init`. Create them once manually via the AWS console or CLI, then Terraform manages everything else.
 
 ---
 
@@ -190,7 +169,7 @@ docker push "$ECR:latest"
 # 2. Apply Terraform
 cd terraform
 terraform apply `
-  -var="app_image_identifier=$ECR`:$SHA" `
+  -var="app_image_identifier=$ECR:$SHA" `
   -var="transfer_user_public_key=<KEY>"
 
 # 3. Run migrations (requires network access to RDS — use VPC-connected machine)

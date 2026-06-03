@@ -714,6 +714,155 @@ resource "aws_lambda_permission" "web_public_invoke" {
 }
 
 # -----------------------------------------------------------------------------
+# Database migrations - CodeBuild runner in VPC
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "codebuild_migrate" {
+  name = "${var.project_name}-codebuild-migrate"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "codebuild.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy" "codebuild_migrate" {
+  name = "${var.project_name}-codebuild-migrate-policy"
+  role = aws_iam_role.codebuild_migrate.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "VpcNetworking"
+        Effect = "Allow"
+        Action = [
+          "ec2:CreateNetworkInterface",
+          "ec2:CreateNetworkInterfacePermission",
+          "ec2:DeleteNetworkInterface",
+          "ec2:DescribeNetworkInterfaces",
+          "ec2:DescribeSubnets",
+          "ec2:DescribeSecurityGroups",
+          "ec2:DescribeVpcs",
+          "ec2:DescribeDhcpOptions"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "DatabaseUrlSecretRead"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = aws_secretsmanager_secret.database_url.arn
+      }
+    ]
+  })
+}
+
+resource "aws_codebuild_project" "db_migrate" {
+  name          = "${var.project_name}-db-migrate"
+  description   = "Run Prisma migrate deploy inside VPC"
+  service_role  = aws_iam_role.codebuild_migrate.arn
+  build_timeout = 30
+
+  source {
+    type      = "NO_SOURCE"
+    buildspec = <<-EOT
+      version: 0.2
+      phases:
+        install:
+          runtime-versions:
+            nodejs: 22
+        build:
+          commands:
+            - git clone --depth 1 "$REPO_URL" /tmp/navara-strategy
+            - cd /tmp/navara-strategy
+            - if [ -n "$REPO_SHA" ]; then git fetch --depth 1 origin "$REPO_SHA"; git checkout "$REPO_SHA"; fi
+            - export DATABASE_URL=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DATABASE_URL_SECRET_ID" --query SecretString --output text)
+            - npm ci
+            - |
+              set +e
+              MIGRATE_OUTPUT=$(npx prisma migrate deploy 2>&1)
+              MIGRATE_EXIT=$?
+              set -e
+              echo "$MIGRATE_OUTPUT"
+              if [ "$MIGRATE_EXIT" -ne 0 ] && echo "$MIGRATE_OUTPUT" | grep -q "P3005" && [ -n "$BASELINE_MIGRATION" ]; then
+                npx prisma migrate resolve --applied "$BASELINE_MIGRATION"
+                npx prisma migrate deploy
+              elif [ "$MIGRATE_EXIT" -ne 0 ]; then
+                exit "$MIGRATE_EXIT"
+              fi
+    EOT
+  }
+
+  artifacts {
+    type = "NO_ARTIFACTS"
+  }
+
+  environment {
+    compute_type                = "BUILD_GENERAL1_SMALL"
+    image                       = "aws/codebuild/standard:7.0"
+    type                        = "LINUX_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+    privileged_mode             = false
+
+    environment_variable {
+      name  = "AWS_REGION"
+      value = var.aws_region
+    }
+
+    environment_variable {
+      name  = "DATABASE_URL_SECRET_ID"
+      value = aws_secretsmanager_secret.database_url.name
+    }
+
+    environment_variable {
+      name  = "REPO_URL"
+      value = "https://github.com/${var.github_repository}.git"
+    }
+
+    environment_variable {
+      name  = "REPO_SHA"
+      value = ""
+    }
+
+    environment_variable {
+      name  = "BASELINE_MIGRATION"
+      value = "20260603_webdav_prisma"
+    }
+  }
+
+  vpc_config {
+    vpc_id             = data.aws_vpc.default.id
+    subnets            = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.app.id]
+  }
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
 # CloudFront distribution in front of Lambda URL
 # -----------------------------------------------------------------------------
 

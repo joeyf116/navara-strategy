@@ -87,3 +87,8 @@ output "lambda_function_arn" {
   value       = aws_lambda_function.web.arn
   description = "Lambda function ARN"
 }
+
+output "db_migrate_codebuild_project" {
+  value       = aws_codebuild_project.db_migrate.name
+  description = "CodeBuild project name used for in-VPC Prisma migrations"
+}

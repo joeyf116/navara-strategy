@@ -27,6 +27,7 @@ env:
   APP_PUBLIC_URL: ${{ vars.APP_PUBLIC_URL }}
   COGNITO_CALLBACK_URLS: ${{ vars.COGNITO_CALLBACK_URLS }}
   COGNITO_LOGOUT_URLS: ${{ vars.COGNITO_LOGOUT_URLS }}
+  DB_MIGRATION_PROJECT_NAME: ${{ vars.DB_MIGRATION_PROJECT_NAME || format('{0}-db-migrate', vars.ECR_REPOSITORY) }}
 
 permissions:
   id-token: write # required for OIDC token exchange
@@ -209,58 +210,63 @@ jobs:
           terraform output app_url
 
   prisma-migrate:
-    name: Prisma Migrate
+    name: Prisma Migrate (CodeBuild)
     runs-on: ubuntu-latest
     needs: [build-push, terraform]
     if: ${{ always() && needs.build-push.result == 'success' && (needs.terraform.result == 'success' || needs.terraform.result == 'skipped') }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Load DATABASE_URL from Secrets Manager
+      - name: Start migration build in VPC
+        id: start_build
         run: |
-          DATABASE_URL=$(aws secretsmanager get-secret-value \
-            --secret-id "${{ env.DATABASE_URL_SECRET_ID }}" \
-            --query SecretString \
+          BUILD_ID=$(aws codebuild start-build \
+            --project-name "${{ env.DB_MIGRATION_PROJECT_NAME }}" \
+            --environment-variables-override \
+              name=REPO_SHA,value="${GITHUB_SHA}",type=PLAINTEXT \
+              name=REPO_URL,value="https://github.com/${{ github.repository }}.git",type=PLAINTEXT \
+              name=DATABASE_URL_SECRET_ID,value="${{ env.DATABASE_URL_SECRET_ID }}",type=PLAINTEXT \
+              name=AWS_REGION,value="${{ env.AWS_REGION }}",type=PLAINTEXT \
+            --query 'build.id' \
             --output text)
-          if [ -z "$DATABASE_URL" ]; then
-            echo "DATABASE_URL secret is empty or missing"
-            exit 1
-          fi
-          echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+          echo "build_id=${BUILD_ID}" >> "$GITHUB_OUTPUT"
+          echo "Started migration build: ${BUILD_ID}"
 
-      - name: Check database reachability from runner
+      - name: Wait for migration build
         run: |
-          DB_HOST=$(node -e "const u = new URL(process.env.DATABASE_URL); console.log(u.hostname)")
-          DB_PORT=$(node -e "const u = new URL(process.env.DATABASE_URL); console.log(u.port || '5432')")
-          echo "Checking TCP connectivity to ${DB_HOST}:${DB_PORT}"
+          BUILD_ID="${{ steps.start_build.outputs.build_id }}"
+          MAX_ATTEMPTS=120
+          ATTEMPT=1
 
-          if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${DB_HOST}/${DB_PORT}"; then
-            echo "DATABASE_REACHABLE=true" >> "$GITHUB_ENV"
-          else
-            echo "DATABASE_REACHABLE=false" >> "$GITHUB_ENV"
-          fi
+          while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+            STATUS=$(aws codebuild batch-get-builds \
+              --ids "$BUILD_ID" \
+              --query 'builds[0].buildStatus' \
+              --output text)
 
-      - name: Run Prisma migrations
-        if: env.DATABASE_REACHABLE == 'true'
-        run: npx prisma migrate deploy
+            echo "Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: ${STATUS}"
 
-      - name: Skip migration when DB is private
-        if: env.DATABASE_REACHABLE != 'true'
-        run: |
-          echo "::warning::Skipping prisma migrate deploy because this runner cannot reach the database endpoint."
-          echo "::warning::Use a self-hosted runner inside the VPC (or run migration from a VPC-connected host) to apply pending migrations."
+            if [ "$STATUS" = "SUCCEEDED" ]; then
+              echo "Migration completed successfully."
+              exit 0
+            fi
+
+            if [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "FAULT" ] || [ "$STATUS" = "TIMED_OUT" ] || [ "$STATUS" = "STOPPED" ]; then
+              aws codebuild batch-get-builds \
+                --ids "$BUILD_ID" \
+                --query 'builds[0].{status:buildStatus,currentPhase:currentPhase,phases:phases[*].[phaseType,phaseStatus,contexts]}' \
+                --output json
+              exit 1
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+          done
+
+          echo "Migration build timed out while waiting for completion."
+          exit 1

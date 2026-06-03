@@ -53,6 +53,16 @@ output "ecr_repository_url" {
   description = "ECR repository URL for pushing container images"
 }
 
+output "github_oidc_provider_arn" {
+  value       = aws_iam_openid_connect_provider.github.arn
+  description = "IAM OIDC provider ARN for GitHub Actions"
+}
+
+output "github_actions_deploy_role_arn" {
+  value       = aws_iam_role.github_actions_deploy.arn
+  description = "IAM role ARN for GitHub Actions OIDC deployments"
+}
+
 output "sftp_endpoint" {
   value       = aws_transfer_server.this.endpoint
   description = "AWS Transfer Family endpoint"

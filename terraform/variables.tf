@@ -70,6 +70,26 @@ variable "ecr_max_image_count" {
   default     = 30
 }
 
+# ---------- GitHub Actions OIDC ----------
+
+variable "github_repository" {
+  description = "GitHub owner/repo allowed to assume the deploy role via OIDC"
+  type        = string
+  default     = "joeyf116/navara-strategy"
+}
+
+variable "github_branch" {
+  description = "Git branch allowed to assume the deploy role via OIDC"
+  type        = string
+  default     = "main"
+}
+
+variable "github_actions_deploy_role_name" {
+  description = "IAM role name for GitHub Actions deployments"
+  type        = string
+  default     = "navara-sftp-github-actions-deploy"
+}
+
 # ---------- File Portal ----------
 
 variable "files_bucket_prefix" {

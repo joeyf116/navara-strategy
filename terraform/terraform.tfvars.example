@@ -17,6 +17,11 @@ web_cors_allowed_origins = ["https://your-domain.com", "http://localhost:3000"]
 ecr_force_delete        = false
 ecr_max_image_count     = 30
 
+# GitHub Actions OIDC
+github_repository       = "joeyf116/navara-strategy"
+github_branch           = "main"
+github_actions_deploy_role_name = "navara-sftp-github-actions-deploy"
+
 # Lambda Web App
 app_image_identifier    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:latest"
 lambda_memory_size      = 1024

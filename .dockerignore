@@ -1,0 +1,33 @@
+# Dependencies and package manager artifacts
+node_modules
+npm-debug.log*
+
+# Build and test outputs
+.next
+out
+coverage
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# VCS and editor files
+.git
+.gitignore
+.vscode
+.idea
+
+# Terraform local state and provider cache
+terraform/.terraform
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Large/generated assets not needed for runtime image
+*.log

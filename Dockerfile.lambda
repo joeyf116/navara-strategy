@@ -1,0 +1,36 @@
+# -----------------------------------------------------------------------------
+# Stage 1: builder - compile the Next.js app
+# -----------------------------------------------------------------------------
+FROM node:20-alpine AS builder
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2: runtime - run standalone app behind Lambda Web Adapter
+# -----------------------------------------------------------------------------
+FROM node:20-alpine AS runner
+WORKDIR /var/task
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV AWS_LWA_PORT=3000
+
+# Lambda Web Adapter extension
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+
+# Next standalone server and assets
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
+EXPOSE 3000
+CMD ["node", "server.js"]

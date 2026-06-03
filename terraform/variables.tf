@@ -78,41 +78,40 @@ variable "files_bucket_prefix" {
   default     = "portal-files"
 }
 
-# ---------- App Runner ----------
+# ---------- Web App (Lambda) ----------
 
 variable "app_image_identifier" {
-  description = "ECR image URI with tag used by App Runner"
+  description = "ECR image URI with tag used by the Lambda web function"
   type        = string
 }
 
-variable "apprunner_cpu" {
-  description = "CPU units for the App Runner service (e.g. 256, 512, 1024, 2048, 4096)"
+variable "lambda_memory_size" {
+  description = "Memory size (MB) for the Lambda web function"
+  type        = number
+  default     = 1024
+}
+
+variable "lambda_timeout" {
+  description = "Timeout (seconds) for the Lambda web function"
+  type        = number
+  default     = 30
+}
+
+variable "lambda_architecture" {
+  description = "Lambda architecture for the web function (x86_64 or arm64)"
   type        = string
-  default     = "256"
+  default     = "x86_64"
 }
 
-variable "apprunner_memory" {
-  description = "Memory in MB for the App Runner service (e.g. 512, 1024, 2048, 3072, 4096)"
+variable "cloudfront_price_class" {
+  description = "CloudFront price class"
   type        = string
-  default     = "512"
+  default     = "PriceClass_100"
 }
 
-variable "apprunner_max_concurrency" {
-  description = "Max concurrent requests per App Runner instance"
-  type        = number
-  default     = 100
-}
-
-variable "apprunner_max_size" {
-  description = "Maximum number of App Runner instances"
-  type        = number
-  default     = 3
-}
-
-variable "apprunner_min_size" {
-  description = "Minimum number of App Runner instances"
-  type        = number
-  default     = 1
+variable "app_public_url" {
+  description = "Public HTTPS base URL used by Auth.js for callback and redirect URLs"
+  type        = string
 }
 
 # ---------- Transfer Family ----------
@@ -134,4 +133,21 @@ variable "log_retention_days" {
   description = "CloudWatch log retention in days"
   type        = number
   default     = 30
+}
+
+# ---------- Cognito ----------
+
+variable "cognito_domain" {
+  description = "Unique Cognito hosted UI domain prefix"
+  type        = string
+}
+
+variable "cognito_callback_urls" {
+  description = "Allowed OAuth callback URLs for the Cognito app client"
+  type        = list(string)
+}
+
+variable "cognito_logout_urls" {
+  description = "Allowed logout redirect URLs for the Cognito app client"
+  type        = list(string)
 }

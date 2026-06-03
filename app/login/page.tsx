@@ -70,18 +70,17 @@ export default function LoginPage() {
 	async function handleOAuthSignIn() {
 		setIsLoading(true);
 		setError("");
-		const result = await signIn("cognito", {
-			callbackUrl: "/",
-			redirect: false,
-		});
-
-		if (result?.error) {
+		try {
+			await signIn("cognito", {
+				callbackUrl: "/uploads",
+				redirect: true,
+			});
+		} catch {
 			setError(
 				"AWS sign in is not configured in this local environment. Set AUTH_COGNITO_ID, AUTH_COGNITO_SECRET, and AUTH_COGNITO_ISSUER to enable it.",
 			);
+			setIsLoading(false);
 		}
-
-		setIsLoading(false);
 	}
 
 	async function handleDevSignIn(e: React.FormEvent) {
@@ -98,7 +97,7 @@ export default function LoginPage() {
 		if (result?.error) {
 			setError("Invalid credentials. Try one of the demo accounts below.");
 		} else {
-			router.push("/");
+			router.push("/uploads");
 		}
 		setIsLoading(false);
 	}
@@ -116,7 +115,7 @@ export default function LoginPage() {
 		if (result?.error) {
 			setError("Login failed.");
 		} else {
-			router.push("/");
+			router.push("/uploads");
 		}
 		setIsLoading(false);
 	}
@@ -129,9 +128,9 @@ export default function LoginPage() {
 					<div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
 						<span className="text-lg font-bold text-primary-foreground">N</span>
 					</div>
-					<h1 className="mt-4 text-2xl font-bold">Navara Insights Portal</h1>
+					<h1 className="mt-4 text-2xl font-bold">Navara File Portal</h1>
 					<p className="text-muted-foreground">
-						Sign in to access the operational dashboard
+						Sign in to access the secure file sharing portal
 					</p>
 				</div>
 

@@ -3,27 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import {
-	LayoutDashboard,
-	Users,
-	FolderOpen,
-	Cog,
-	Activity,
-	AlertTriangle,
-	ClipboardList,
-	Heart,
-	Database,
-	Inbox,
-	Moon,
-	Sun,
-	LogOut,
-	Menu,
-	X,
-	ShieldAlert,
-	FileCheck,
-	ArrowRightLeft,
-	Upload,
-} from "lucide-react";
+import { Upload, Moon, Sun, LogOut, Menu, X } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -34,22 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const navigation = [
-	{ name: "Dashboard", href: "/", icon: LayoutDashboard },
-	{ name: "Tenants", href: "/tenants", icon: Users },
-	{ name: "File Explorer", href: "/files", icon: FolderOpen },
-	{ name: "File Portal", href: "/uploads", icon: Upload },
-	{ name: "Ingestion Jobs", href: "/ingestion", icon: Activity },
-	{ name: "Validation", href: "/validation", icon: FileCheck },
-	{ name: "Anomaly Detection", href: "/anomalies", icon: ShieldAlert },
-	{ name: "Reconciliation", href: "/reconciliation", icon: ArrowRightLeft },
-	{ name: "Queue Monitoring", href: "/queues", icon: Inbox },
-	{ name: "Failed Processing", href: "/failed", icon: AlertTriangle },
-	{ name: "Audit Logs", href: "/audit", icon: ClipboardList },
-	{ name: "Service Health", href: "/health", icon: Heart },
-	{ name: "Database Insights", href: "/database", icon: Database },
-	{ name: "Settings", href: "/settings", icon: Cog },
-];
+const navigation = [{ name: "File Portal", href: "/uploads", icon: Upload }];
 
 function roleBadgeLabel(role: string | undefined): string {
 	switch (role) {
@@ -88,11 +53,11 @@ export function DashboardSidebar() {
 	const sidebarContent = (
 		<>
 			<div className="flex h-14 items-center px-4">
-				<Link href="/" className="flex items-center gap-2">
+				<Link href="/uploads" className="flex items-center gap-2">
 					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
 						<span className="text-sm font-bold text-primary-foreground">N</span>
 					</div>
-					<span className="text-lg font-semibold">Navara</span>
+					<span className="text-lg font-semibold">Navara Files</span>
 				</Link>
 				<Button
 					variant="outline"

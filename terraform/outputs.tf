@@ -1,6 +1,16 @@
 output "app_url" {
-  value       = aws_apprunner_service.this.service_url
-  description = "Public URL for the Next.js file hub"
+  value       = "https://${aws_cloudfront_distribution.web.domain_name}"
+  description = "Public CloudFront URL for the Next.js web app"
+}
+
+output "lambda_url" {
+  value       = aws_lambda_function_url.web.function_url
+  description = "Lambda Function URL origin"
+}
+
+output "cloudfront_domain_name" {
+  value       = aws_cloudfront_distribution.web.domain_name
+  description = "CloudFront distribution domain"
 }
 
 output "database_endpoint" {
@@ -25,7 +35,7 @@ output "database_username" {
 
 output "database_url_secret_arn" {
   value       = aws_secretsmanager_secret.database_url.arn
-  description = "Secrets Manager ARN containing DATABASE_URL for App Runner"
+  description = "Secrets Manager ARN containing DATABASE_URL for Lambda"
 }
 
 output "nextauth_secret_arn" {
@@ -55,10 +65,10 @@ output "sftp_bucket" {
 
 output "cloudwatch_log_group" {
   value       = aws_cloudwatch_log_group.app.name
-  description = "CloudWatch log group for App Runner"
+  description = "CloudWatch log group for Lambda"
 }
 
-output "apprunner_service_arn" {
-  value       = aws_apprunner_service.this.arn
-  description = "App Runner service ARN"
+output "lambda_function_arn" {
+  value       = aws_lambda_function.web.arn
+  description = "Lambda function ARN"
 }

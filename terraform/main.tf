@@ -15,6 +15,19 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_availability_zones" "available" {
+  state = "available"
+}
+
+data "aws_route_tables" "default" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+locals {
+  private_subnet_azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  lambda_origin_host = trimprefix(trimsuffix(aws_lambda_function_url.web.function_url, "/"), "https://")
+}
+
 # -----------------------------------------------------------------------------
 # Networking – security groups
 # -----------------------------------------------------------------------------
@@ -78,7 +91,7 @@ resource "aws_db_instance" "this" {
   max_allocated_storage     = 100
   db_name                   = var.database_name
   engine                    = "postgres"
-  engine_version            = "16.1"
+  engine_version            = "16.14"
   instance_class            = var.database_instance_class
   username                  = var.database_username
   password                  = random_password.db.result
@@ -262,6 +275,27 @@ resource "aws_ecr_lifecycle_policy" "app" {
   })
 }
 
+resource "aws_ecr_repository_policy" "lambda_pull" {
+  repository = aws_ecr_repository.app.name
+
+  policy = jsonencode({
+    Version = "2008-10-17"
+    Statement = [
+      {
+        Sid    = "LambdaECRImageRetrievalPolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
 # -----------------------------------------------------------------------------
 # S3 – SFTP transfer bucket
 # -----------------------------------------------------------------------------
@@ -408,18 +442,83 @@ resource "aws_transfer_ssh_key" "client" {
 # -----------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_group" "app" {
-  name              = "/apprunner/${var.project_name}"
+  name              = "/aws/lambda/${var.project_name}-web"
   retention_in_days = var.log_retention_days
 
   tags = local.common_tags
 }
 
 # -----------------------------------------------------------------------------
-# App Runner – IAM
+# Lambda private networking and outbound path (NAT)
 # -----------------------------------------------------------------------------
 
-resource "aws_iam_role" "apprunner_ecr_access" {
-  name = "${var.project_name}-apprunner-ecr"
+resource "aws_subnet" "private" {
+  count = 2
+
+  vpc_id                  = data.aws_vpc.default.id
+  cidr_block              = cidrsubnet(data.aws_vpc.default.cidr_block, 8, 200 + count.index)
+  availability_zone       = local.private_subnet_azs[count.index]
+  map_public_ip_on_launch = false
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-private-${count.index + 1}"
+  })
+}
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat-eip"
+  })
+}
+
+resource "aws_nat_gateway" "this" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = data.aws_subnets.default.ids[0]
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-nat"
+  })
+
+  depends_on = [aws_eip.nat]
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = data.aws_vpc.default.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.this.id
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${var.project_name}-private-rt"
+  })
+}
+
+resource "aws_route_table_association" "private" {
+  count = 2
+
+  subnet_id      = aws_subnet.private[count.index].id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = data.aws_vpc.default.id
+  service_name      = "com.amazonaws.${var.aws_region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = concat(data.aws_route_tables.default.ids, [aws_route_table.private.id])
+
+  tags = local.common_tags
+}
+
+# -----------------------------------------------------------------------------
+# Lambda web app – IAM
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "lambda_exec" {
+  name = "${var.project_name}-lambda-exec"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -427,7 +526,7 @@ resource "aws_iam_role" "apprunner_ecr_access" {
       {
         Effect = "Allow"
         Principal = {
-          Service = "build.apprunner.amazonaws.com"
+          Service = "lambda.amazonaws.com"
         }
         Action = "sts:AssumeRole"
       }
@@ -437,39 +536,25 @@ resource "aws_iam_role" "apprunner_ecr_access" {
   tags = local.common_tags
 }
 
-resource "aws_iam_role_policy_attachment" "apprunner_ecr_access" {
-  role       = aws_iam_role.apprunner_ecr_access.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess"
+resource "aws_iam_role_policy_attachment" "lambda_basic" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role" "apprunner_instance" {
-  name = "${var.project_name}-apprunner-instance"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Principal = {
-          Service = "tasks.apprunner.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = local.common_tags
+resource "aws_iam_role_policy_attachment" "lambda_vpc" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
-resource "aws_iam_role_policy" "apprunner_instance" {
-  name = "${var.project_name}-apprunner-instance-policy"
-  role = aws_iam_role.apprunner_instance.id
+resource "aws_iam_role_policy" "lambda_app" {
+  name = "${var.project_name}-lambda-app-policy"
+  role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SecretsAccess"
+        Sid    = "SecretsRead"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue"
@@ -494,99 +579,206 @@ resource "aws_iam_role_policy" "apprunner_instance" {
           aws_s3_bucket.transfer.arn,
           "${aws_s3_bucket.transfer.arn}/*"
         ]
-      },
-      {
-        Sid    = "CloudWatchLogs"
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.app.arn}:*"
       }
     ]
   })
 }
 
 # -----------------------------------------------------------------------------
-# App Runner – networking & service
+# Lambda web app – service
 # -----------------------------------------------------------------------------
 
-resource "aws_apprunner_vpc_connector" "this" {
-  vpc_connector_name = "${var.project_name}-connector"
-  subnets            = data.aws_subnets.default.ids
-  security_groups    = [aws_security_group.app.id]
+resource "aws_lambda_function" "web" {
+  function_name = "${var.project_name}-web"
+  role          = aws_iam_role.lambda_exec.arn
+  package_type  = "Image"
+  image_uri     = var.app_image_identifier
+  timeout       = var.lambda_timeout
+  memory_size   = var.lambda_memory_size
+  architectures = [var.lambda_architecture]
+
+  image_config {
+    command = ["node", "server.js"]
+  }
+
+  environment {
+    variables = {
+      NODE_ENV            = "production"
+      PORT                = "3000"
+      HOSTNAME            = "0.0.0.0"
+      AUTH_COGNITO_ISSUER = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
+      AUTH_COGNITO_ID     = aws_cognito_user_pool_client.this.id
+      AUTH_COGNITO_SECRET = aws_cognito_user_pool_client.this.client_secret
+      DATABASE_URL        = aws_secretsmanager_secret_version.database_url.secret_string
+      DATABASE_SSL_REJECT_UNAUTHORIZED = "false"
+      NEXTAUTH_SECRET     = aws_secretsmanager_secret_version.nextauth_secret.secret_string
+      NEXTAUTH_URL        = var.app_public_url
+      AUTH_URL            = var.app_public_url
+      AUTH_TRUST_HOST     = "true"
+      FILES_BUCKET        = aws_s3_bucket.transfer.bucket
+      FILES_BUCKET_PREFIX = var.files_bucket_prefix
+    }
+  }
+
+  vpc_config {
+    subnet_ids         = aws_subnet.private[*].id
+    security_group_ids = [aws_security_group.app.id]
+  }
 
   tags = local.common_tags
 }
 
-resource "aws_apprunner_auto_scaling_configuration_version" "this" {
-  auto_scaling_configuration_name = "${var.project_name}-scaling"
+resource "aws_lambda_function_url" "web" {
+  function_name      = aws_lambda_function.web.function_name
+  authorization_type = "NONE"
 
-  max_concurrency = var.apprunner_max_concurrency
-  max_size        = var.apprunner_max_size
-  min_size        = var.apprunner_min_size
-
-  tags = local.common_tags
+  cors {
+    allow_credentials = false
+    allow_headers     = ["*"]
+    allow_methods     = ["*"]
+    allow_origins     = ["*"]
+    expose_headers    = ["*"]
+    max_age           = 86400
+  }
 }
 
-resource "aws_apprunner_service" "this" {
-  service_name = "${var.project_name}-web"
+resource "aws_lambda_permission" "web_public" {
+  statement_id           = "AllowPublicFunctionUrlInvoke"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.web.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
 
-  source_configuration {
-    authentication_configuration {
-      access_role_arn = aws_iam_role.apprunner_ecr_access.arn
+resource "aws_lambda_permission" "web_public_invoke" {
+  statement_id           = "AllowPublicInvokeViaFunctionUrl"
+  action                 = "lambda:InvokeFunction"
+  function_name          = aws_lambda_function.web.function_name
+  principal              = "*"
+}
+
+# -----------------------------------------------------------------------------
+# CloudFront distribution in front of Lambda URL
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudfront_origin_request_policy" "all_viewer" {
+  name    = "${var.project_name}-all-viewer"
+  comment = "Forward all viewer headers, cookies, and query strings"
+
+  cookies_config {
+    cookie_behavior = "all"
+  }
+
+  headers_config {
+    header_behavior = "allViewer"
+  }
+
+  query_strings_config {
+    query_string_behavior = "all"
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "no_cache" {
+  name        = "${var.project_name}-no-cache"
+  comment     = "Disable cache for dynamic Next.js routes"
+  default_ttl = 0
+  max_ttl     = 0
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
     }
 
-    image_repository {
-      image_repository_type = "ECR"
-      image_identifier      = var.app_image_identifier
-
-      image_configuration {
-        port = "3000"
-
-        runtime_environment_variables = {
-          NODE_ENV             = "production"
-          AUTH_COGNITO_ISSUER  = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.this.id}"
-          FILES_BUCKET         = aws_s3_bucket.transfer.bucket
-          FILES_BUCKET_PREFIX  = var.files_bucket_prefix
-        }
-
-        runtime_environment_secrets = {
-          DATABASE_URL         = aws_secretsmanager_secret.database_url.arn
-          NEXTAUTH_SECRET      = aws_secretsmanager_secret.nextauth_secret.arn
-          AUTH_COGNITO_ID      = aws_secretsmanager_secret.cognito_client_id.arn
-          AUTH_COGNITO_SECRET  = aws_secretsmanager_secret.cognito_client_secret.arn
-        }
-      }
+    headers_config {
+      header_behavior = "none"
     }
 
-    auto_deployments_enabled = false
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+
+    enable_accept_encoding_brotli = false
+    enable_accept_encoding_gzip   = false
   }
+}
 
-  instance_configuration {
-    cpu               = var.apprunner_cpu
-    memory            = var.apprunner_memory
-    instance_role_arn = aws_iam_role.apprunner_instance.arn
+resource "aws_cloudfront_cache_policy" "static_cache" {
+  name        = "${var.project_name}-static-cache"
+  comment     = "Long cache for Next.js static assets"
+  default_ttl = 86400
+  max_ttl     = 31536000
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
   }
+}
 
-  health_check_configuration {
-    protocol            = "HTTP"
-    path                = "/api/health"
-    interval            = 10
-    timeout             = 5
-    healthy_threshold   = 1
-    unhealthy_threshold = 5
-  }
+resource "aws_cloudfront_distribution" "web" {
+  enabled         = true
+  is_ipv6_enabled = true
+  comment         = "${var.project_name} Next.js web distribution"
+  price_class     = var.cloudfront_price_class
 
-  auto_scaling_configuration_arn = aws_apprunner_auto_scaling_configuration_version.this.arn
+  origin {
+    domain_name = local.lambda_origin_host
+    origin_id   = "lambda-url-origin"
 
-  network_configuration {
-    egress_configuration {
-      egress_type       = "VPC"
-      vpc_connector_arn = aws_apprunner_vpc_connector.this.arn
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
+
+  default_cache_behavior {
+    target_origin_id       = "lambda-url-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods         = ["GET", "HEAD", "OPTIONS"]
+    compress               = true
+
+    cache_policy_id          = aws_cloudfront_cache_policy.no_cache.id
+    # Managed policy: AllViewerExceptHostHeader.
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  }
+
+  ordered_cache_behavior {
+    path_pattern           = "/_next/static/*"
+    target_origin_id       = "lambda-url-origin"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD", "OPTIONS"]
+    compress               = true
+    cache_policy_id        = aws_cloudfront_cache_policy.static_cache.id
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+
+  depends_on = [aws_lambda_function_url.web]
 
   tags = local.common_tags
 }

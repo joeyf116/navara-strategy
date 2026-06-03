@@ -64,6 +64,36 @@ const isDevMode =
 	process.env.NODE_ENV !== "production" ||
 	process.env.NEXT_PUBLIC_DEV_MODE === "true";
 
+function normalizeCognitoGroups(groupsClaim: unknown): string[] {
+	if (Array.isArray(groupsClaim)) {
+		return groupsClaim
+			.filter((value): value is string => typeof value === "string")
+			.map((value) => value.toLowerCase());
+	}
+
+	if (typeof groupsClaim === "string") {
+		return groupsClaim
+			.split(",")
+			.map((value) => value.trim().toLowerCase())
+			.filter(Boolean);
+	}
+
+	return [];
+}
+
+function roleFromCognitoProfile(profile: unknown): UserRole {
+	const source = (profile ?? {}) as Record<string, unknown>;
+	const groups = normalizeCognitoGroups(source["cognito:groups"]);
+
+	if (groups.includes("super_admin")) return "super_admin";
+	if (groups.includes("admin")) return "admin";
+	if (groups.includes("read_only_auditor")) return "read_only_auditor";
+	if (groups.includes("tenant_user")) return "tenant_user";
+
+	// Safe default for any Cognito user not explicitly mapped.
+	return "tenant_user";
+}
+
 // Build the list of providers based on environment
 function buildProviders(): Provider[] {
 	const providers: Provider[] = [];
@@ -111,25 +141,18 @@ function buildProviders(): Provider[] {
 	return providers;
 }
 
-// Default role for users authenticated via OAuth.
-// TODO: Replace with a DB lookup or Cognito group/claims mapping for
-// production RBAC. This default ensures new OAuth users have access while
-// the mapping is being configured.
-const DEFAULT_OAUTH_ROLE: UserRole = "admin";
-
 export const { handlers, signIn, signOut, auth } = NextAuth({
 	providers: buildProviders(),
 	callbacks: {
-		jwt({ token, user, account }) {
+		jwt({ token, user, account, profile }) {
 			if (user) {
 				// Dev credentials already have role set
 				if (user.role) {
 					token.role = user.role;
 					token.tenantId = user.tenantId;
 				} else if (account?.provider === "cognito") {
-					// Production OAuth — assign default role
-					// Replace with a DB lookup or Cognito groups mapping for fine-grained RBAC
-					token.role = DEFAULT_OAUTH_ROLE;
+					// Production OAuth — map Cognito groups to app roles with tenant-safe default.
+					token.role = roleFromCognitoProfile(profile);
 				}
 			}
 			return token;

@@ -95,6 +95,19 @@ resource "aws_cognito_user_pool" "this" {
     }
   }
 
+  schema {
+    name                     = "sftp_folder"
+    attribute_data_type      = "String"
+    required                 = false
+    mutable                  = true
+    developer_only_attribute = false
+
+    string_attribute_constraints {
+      min_length = 0
+      max_length = 256
+    }
+  }
+
   account_recovery_setting {
     recovery_mechanism {
       name     = "verified_email"

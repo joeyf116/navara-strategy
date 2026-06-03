@@ -181,15 +181,16 @@ export function LoginForm({
 							</CardHeader>
 							<CardContent className="space-y-2">
 								{DEV_ACCOUNTS.map((account) => (
-									<button
+									<Button
 										key={account.email}
+										variant="outline"
+										className="w-full justify-between"
 										onClick={() => void handleQuickLogin(account.email)}
 										disabled={isLoading}
-										className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-sm transition-colors hover:bg-accent disabled:opacity-50"
 									>
 										<span className="font-mono text-xs">{account.email}</span>
 										<Badge variant="outline">{account.label}</Badge>
-									</button>
+									</Button>
 								))}
 							</CardContent>
 						</Card>
@@ -199,14 +200,15 @@ export function LoginForm({
 				{/* Toggle between prod/dev login when both are available */}
 				{isDev && hasCognito && (
 					<div className="text-center">
-						<button
+						<Button
+							variant="outline"
+							size="sm"
 							onClick={() => setShowDevLogin((v) => !v)}
-							className="text-xs text-muted-foreground underline-offset-4 hover:underline"
 						>
 							{showDevLogin
 								? "Switch to production login"
 								: "Switch to dev mode login"}
-						</button>
+						</Button>
 					</div>
 				)}
 			</div>

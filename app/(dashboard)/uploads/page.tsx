@@ -430,8 +430,8 @@ export default function FilePortalPage() {
 								/>
 								<p className="text-xs text-muted-foreground">
 									{shareMode === "specific_user"
-										? "This file will be visible only to the target user and admins."
-										: "Switch to Specific User to securely share data with one recipient."}
+										? "Visible only to the target user and admins."
+										: "Select Specific User to share with a single recipient."}
 								</p>
 							</div>
 						)}
@@ -647,11 +647,10 @@ export default function FilePortalPage() {
 				</Card>
 			)}
 
-			{status.includes("failed") && (
+			{status.toLowerCase().includes("failed") && (
 				<div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
 					<AlertTriangle className="h-4 w-4" />
-					Some uploads failed validation checks. Retry with supported formats
-					and size limits.
+					{status}
 				</div>
 			)}
 		</div>

@@ -673,6 +673,8 @@ resource "aws_lambda_function" "web" {
       AUTH_TRUST_HOST     = "true"
       FILES_BUCKET        = aws_s3_bucket.transfer.bucket
       FILES_BUCKET_PREFIX = var.files_bucket_prefix
+      SFTP_ENDPOINT       = aws_transfer_server.this.endpoint
+      SFTP_USERNAME       = var.transfer_user_name
     }
   }
 

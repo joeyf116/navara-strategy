@@ -1,11 +1,21 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Folder, FileText, MoreHorizontal, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+	Folder,
+	FileText,
+	MoreHorizontal,
+	Upload,
+	ChevronRight,
+	FolderPlus,
+	Loader2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
 	Table,
 	TableBody,
@@ -18,8 +28,17 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 
 type Entry = {
 	id: string;
@@ -32,7 +51,15 @@ type Entry = {
 	virtualPath: string;
 };
 
+type DialogState =
+	| { type: "closed" }
+	| { type: "newFolder" }
+	| { type: "rename"; entry: Entry }
+	| { type: "delete"; entry: Entry }
+	| { type: "share"; entry: Entry };
+
 function formatSize(bytes: number) {
+	if (bytes === 0) return "â€”";
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	if (bytes < 1024 * 1024 * 1024)
@@ -44,13 +71,25 @@ export function FileManagerConsole() {
 	const [currentPath, setCurrentPath] = useState("/");
 	const [entries, setEntries] = useState<Entry[]>([]);
 	const [loading, setLoading] = useState(false);
-	const [status, setStatus] = useState("");
+	const [status, setStatus] = useState<{
+		message: string;
+		error?: boolean;
+	} | null>(null);
 	const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+	const [dialog, setDialog] = useState<DialogState>({ type: "closed" });
+
+	// Dialog field state
+	const [folderName, setFolderName] = useState("");
+	const [renameName, setRenameName] = useState("");
+	const [shareEmail, setShareEmail] = useState("");
+	const [shareWrite, setShareWrite] = useState(false);
+	const [dialogWorking, setDialogWorking] = useState(false);
+
+	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	async function load(path: string) {
 		setLoading(true);
-		setStatus("");
-
+		setStatus(null);
 		try {
 			const response = await fetch(
 				`/api/files/tree?path=${encodeURIComponent(path)}`,
@@ -59,65 +98,154 @@ export function FileManagerConsole() {
 				entries?: Entry[];
 				error?: string;
 			};
-
-			if (!response.ok) {
-				throw new Error(payload.error ?? "Failed to load directory.");
-			}
-
+			if (!response.ok) throw new Error(payload.error ?? "Failed to load.");
 			setCurrentPath(path);
 			setEntries(payload.entries ?? []);
 		} catch (error) {
-			setStatus(
-				error instanceof Error ? error.message : "Failed to load directory.",
-			);
+			setStatus({
+				message: error instanceof Error ? error.message : "Failed to load.",
+				error: true,
+			});
 		} finally {
 			setLoading(false);
 		}
 	}
 
 	useEffect(() => {
-		const id = window.setTimeout(() => {
-			void load("/");
-		}, 0);
-
-		return () => {
-			window.clearTimeout(id);
-		};
+		void load("/");
 	}, []);
 
 	const breadcrumbs = useMemo(() => {
 		const segments = currentPath.split("/").filter(Boolean);
 		const parts = [{ label: "Root", path: "/" }];
-
-		for (let i = 0; i < segments.length; i += 1) {
+		for (let i = 0; i < segments.length; i++) {
 			parts.push({
 				label: segments[i],
 				path: `/${segments.slice(0, i + 1).join("/")}`,
 			});
 		}
-
 		return parts;
 	}, [currentPath]);
 
-	async function createFolder() {
-		const name = window.prompt("Folder name");
-		if (!name) return;
+	function openNewFolder() {
+		setFolderName("");
+		setDialog({ type: "newFolder" });
+	}
 
+	function openRename(entry: Entry) {
+		setRenameName(entry.name);
+		setDialog({ type: "rename", entry });
+	}
+
+	function openDelete(entry: Entry) {
+		setDialog({ type: "delete", entry });
+	}
+
+	function openShare(entry: Entry) {
+		setShareEmail("");
+		setShareWrite(false);
+		setDialog({ type: "share", entry });
+	}
+
+	function closeDialog() {
+		setDialog({ type: "closed" });
+		setDialogWorking(false);
+	}
+
+	async function confirmCreateFolder() {
+		const name = folderName.trim();
+		if (!name) return;
+		setDialogWorking(true);
 		const response = await fetch("/api/files/tree", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ action: "createFolder", path: currentPath, name }),
 		});
-
 		const payload = (await response.json().catch(() => ({}))) as {
 			error?: string;
 		};
+		setDialogWorking(false);
 		if (!response.ok) {
-			setStatus(payload.error ?? "Failed to create folder.");
+			setStatus({
+				message: payload.error ?? "Failed to create folder.",
+				error: true,
+			});
+		} else {
+			setStatus({ message: `Folder "${name}" created.` });
+			await load(currentPath);
+		}
+		closeDialog();
+	}
+
+	async function confirmRename() {
+		if (dialog.type !== "rename") return;
+		const name = renameName.trim();
+		if (!name || name === dialog.entry.name) {
+			closeDialog();
 			return;
 		}
+		setDialogWorking(true);
+		const response = await fetch("/api/files/tree", {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ id: dialog.entry.id, name }),
+		});
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+		};
+		setDialogWorking(false);
+		if (!response.ok) {
+			setStatus({ message: payload.error ?? "Rename failed.", error: true });
+		} else {
+			await load(currentPath);
+		}
+		closeDialog();
+	}
 
-		await load(currentPath);
+	async function confirmDelete() {
+		if (dialog.type !== "delete") return;
+		setDialogWorking(true);
+		const response = await fetch(
+			`/api/files/tree?id=${encodeURIComponent(dialog.entry.id)}`,
+			{ method: "DELETE" },
+		);
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+		};
+		setDialogWorking(false);
+		if (!response.ok) {
+			setStatus({ message: payload.error ?? "Delete failed.", error: true });
+		} else {
+			await load(currentPath);
+		}
+		closeDialog();
+	}
+
+	async function confirmShare() {
+		if (dialog.type !== "share") return;
+		const email = shareEmail.trim().toLowerCase();
+		if (!email) return;
+		setDialogWorking(true);
+		const response = await fetch("/api/files/tree", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				action: "share",
+				nodeId: dialog.entry.id,
+				granteeEmail: email,
+				canWrite: shareWrite,
+			}),
+		});
+		const payload = (await response.json().catch(() => ({}))) as {
+			error?: string;
+		};
+		setDialogWorking(false);
+		if (!response.ok) {
+			setStatus({ message: payload.error ?? "Share failed.", error: true });
+		} else {
+			setStatus({ message: `Shared with ${email}.` });
+		}
+		closeDialog();
 	}
 
 	async function uploadFile(file: File) {
@@ -135,14 +263,14 @@ export function FileManagerConsole() {
 				if (xhr.status >= 200 && xhr.status < 300) {
 					await load(currentPath);
 				} else {
-					setStatus("Upload failed.");
+					setStatus({ message: "Upload failed.", error: true });
 				}
 				resolve();
 			};
 
 			xhr.onerror = () => {
 				setUploadProgress(null);
-				setStatus("Upload failed.");
+				setStatus({ message: "Upload failed.", error: true });
 				resolve();
 			};
 
@@ -153,234 +281,412 @@ export function FileManagerConsole() {
 		});
 	}
 
-	async function renameEntry(entry: Entry) {
-		const name = window.prompt("New name", entry.name);
-		if (!name || name === entry.name) return;
-
-		const response = await fetch("/api/files/tree", {
-			method: "PATCH",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ id: entry.id, name }),
-		});
-
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-		};
-		if (!response.ok) {
-			setStatus(payload.error ?? "Rename failed.");
-			return;
-		}
-
-		await load(currentPath);
-	}
-
-	async function deleteEntry(entry: Entry) {
-		const confirmed = window.confirm(`Delete ${entry.name}?`);
-		if (!confirmed) return;
-
-		const response = await fetch(
-			`/api/files/tree?id=${encodeURIComponent(entry.id)}`,
-			{
-				method: "DELETE",
-			},
-		);
-
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-		};
-		if (!response.ok) {
-			setStatus(payload.error ?? "Delete failed.");
-			return;
-		}
-
-		await load(currentPath);
-	}
-
-	async function shareEntry(entry: Entry) {
-		const email = window.prompt("Share with email");
-		if (!email) return;
-
-		const canWrite = window.confirm("Allow write access?");
-		const response = await fetch("/api/files/tree", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				action: "share",
-				nodeId: entry.id,
-				granteeEmail: email,
-				canWrite,
-			}),
-		});
-
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-		};
-		if (!response.ok) {
-			setStatus(payload.error ?? "Share failed.");
-			return;
-		}
-
-		setStatus(`Shared ${entry.name} with ${email}.`);
-	}
-
 	return (
-		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">File Console</h1>
-				<p className="text-muted-foreground">
-					Manage files in My Files and Shared with Me. Changes sync to WebDAV.
-				</p>
+		<>
+			<div className="space-y-6">
+				<div>
+					<h1 className="text-2xl font-bold">Files</h1>
+					<p className="text-muted-foreground">
+						Browse and manage your files. Changes sync to WebDAV automatically.
+					</p>
+				</div>
+
+				<Card>
+					<CardHeader className="pb-3">
+						<div className="flex flex-wrap items-center justify-between gap-3">
+							{/* Breadcrumb */}
+							<nav className="flex flex-wrap items-center gap-1 text-sm">
+								{breadcrumbs.map((crumb, i) => (
+									<span key={crumb.path} className="flex items-center gap-1">
+										{i > 0 && (
+											<ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+										)}
+										<button
+											onClick={() => void load(crumb.path)}
+											className={
+												i === breadcrumbs.length - 1
+													? "font-medium text-foreground"
+													: "text-muted-foreground hover:text-foreground"
+											}
+										>
+											{crumb.label}
+										</button>
+									</span>
+								))}
+							</nav>
+
+							{/* Toolbar */}
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => void load("/My Files")}
+								>
+									My Files
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => void load("/Shared with Me")}
+								>
+									Shared with Me
+								</Button>
+								<Button variant="outline" size="sm" onClick={openNewFolder}>
+									<FolderPlus className="mr-1.5 h-4 w-4" />
+									New Folder
+								</Button>
+								<Button size="sm" onClick={() => fileInputRef.current?.click()}>
+									<Upload className="mr-1.5 h-4 w-4" />
+									Upload
+								</Button>
+								<input
+									ref={fileInputRef}
+									type="file"
+									className="hidden"
+									onChange={(event) => {
+										const file = event.target.files?.[0];
+										if (file) void uploadFile(file);
+										event.currentTarget.value = "";
+									}}
+								/>
+							</div>
+						</div>
+
+						{/* Upload progress */}
+						{uploadProgress !== null && (
+							<div className="mt-3 space-y-1">
+								<p className="text-xs text-muted-foreground">
+									Uploadingâ€¦ {uploadProgress}%
+								</p>
+								<div className="h-1.5 w-full rounded-full bg-muted">
+									<div
+										className="h-full rounded-full bg-primary transition-all"
+										style={{ width: `${uploadProgress}%` }}
+									/>
+								</div>
+							</div>
+						)}
+
+						{/* Status message */}
+						{status && (
+							<p
+								className={`mt-2 text-sm ${status.error ? "text-destructive" : "text-muted-foreground"}`}
+							>
+								{status.message}
+							</p>
+						)}
+					</CardHeader>
+
+					<CardContent className="px-0 pb-0">
+						<Table>
+							<TableHeader>
+								<TableRow>
+									<TableHead className="pl-6">Name</TableHead>
+									<TableHead className="hidden md:table-cell">Owner</TableHead>
+									<TableHead className="hidden sm:table-cell">
+										Modified
+									</TableHead>
+									<TableHead className="hidden sm:table-cell">Size</TableHead>
+									<TableHead className="w-12 pr-4" />
+								</TableRow>
+							</TableHeader>
+							<TableBody>
+								{loading ? (
+									<TableRow>
+										<TableCell colSpan={5} className="py-12 text-center">
+											<Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+										</TableCell>
+									</TableRow>
+								) : entries.length === 0 ? (
+									<TableRow>
+										<TableCell
+											colSpan={5}
+											className="py-12 text-center text-muted-foreground"
+										>
+											This folder is empty.
+										</TableCell>
+									</TableRow>
+								) : (
+									entries.map((entry) => (
+										<TableRow key={entry.id} className="group">
+											<TableCell className="pl-6">
+												<button
+													className="flex items-center gap-2 text-left font-medium hover:underline"
+													onClick={() => {
+														if (entry.kind === "folder") {
+															void load(entry.virtualPath);
+														}
+													}}
+													disabled={entry.kind !== "folder"}
+												>
+													{entry.kind === "folder" ? (
+														<Folder className="h-4 w-4 shrink-0 text-amber-500" />
+													) : (
+														<FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+													)}
+													<span className="truncate max-w-50">
+														{entry.name}
+													</span>
+												</button>
+											</TableCell>
+											<TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+												{entry.ownerEmail}
+											</TableCell>
+											<TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
+												{new Date(entry.updatedAt).toLocaleDateString(
+													undefined,
+													{
+														month: "short",
+														day: "numeric",
+														year: "numeric",
+													},
+												)}
+											</TableCell>
+											<TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
+												{entry.kind === "file"
+													? formatSize(entry.sizeBytes)
+													: "â€”"}
+											</TableCell>
+											<TableCell className="pr-4">
+												<DropdownMenu>
+													<DropdownMenuTrigger asChild>
+														<Button
+															variant="outline"
+															size="sm"
+															className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+														>
+															<MoreHorizontal className="h-4 w-4" />
+															<span className="sr-only">Actions</span>
+														</Button>
+													</DropdownMenuTrigger>
+													<DropdownMenuContent align="end">
+														{entry.kind === "file" && (
+															<DropdownMenuItem
+																onClick={() => {
+																	window.location.href = `/api/files/tree/download/${entry.id}`;
+																}}
+															>
+																Download
+															</DropdownMenuItem>
+														)}
+														{entry.kind === "file" && <DropdownMenuSeparator />}
+														<DropdownMenuItem onClick={() => openRename(entry)}>
+															Rename
+														</DropdownMenuItem>
+														<DropdownMenuItem onClick={() => openShare(entry)}>
+															Shareâ€¦
+														</DropdownMenuItem>
+														<DropdownMenuSeparator />
+														<DropdownMenuItem
+															className="text-destructive focus:text-destructive"
+															onClick={() => openDelete(entry)}
+														>
+															Delete
+														</DropdownMenuItem>
+													</DropdownMenuContent>
+												</DropdownMenu>
+											</TableCell>
+										</TableRow>
+									))
+								)}
+							</TableBody>
+						</Table>
+					</CardContent>
+				</Card>
 			</div>
 
-			<Card>
-				<CardHeader>
-					<CardTitle>Directory</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-3">
-					<div className="flex flex-wrap items-center gap-2 text-sm">
-						{breadcrumbs.map((crumb) => (
-							<Button
-								key={crumb.path}
-								variant="outline"
-								size="sm"
-								onClick={() => void load(crumb.path)}
-							>
-								{crumb.label}
-							</Button>
-						))}
+			{/* New Folder Dialog */}
+			<Dialog
+				open={dialog.type === "newFolder"}
+				onOpenChange={(open) => !open && closeDialog()}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>New Folder</DialogTitle>
+						<DialogDescription>
+							Create a new folder in{" "}
+							<span className="font-mono">{currentPath}</span>.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-1.5">
+						<Label htmlFor="folder-name">Folder name</Label>
+						<Input
+							id="folder-name"
+							placeholder="My Folder"
+							value={folderName}
+							onChange={(e) => setFolderName(e.target.value)}
+							onKeyDown={(e) => e.key === "Enter" && void confirmCreateFolder()}
+							autoFocus
+						/>
 					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={closeDialog}
+							disabled={dialogWorking}
+						>
+							Cancel
+						</Button>
+						<Button
+							onClick={() => void confirmCreateFolder()}
+							disabled={!folderName.trim() || dialogWorking}
+						>
+							{dialogWorking && (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							)}
+							Create
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
-					<div className="flex flex-wrap gap-2">
-						<Button variant="outline" onClick={() => void load("/My Files")}>
-							My Files
+			{/* Rename Dialog */}
+			<Dialog
+				open={dialog.type === "rename"}
+				onOpenChange={(open) => !open && closeDialog()}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>Rename</DialogTitle>
+						<DialogDescription>
+							Enter a new name for &ldquo;
+							{dialog.type === "rename" ? dialog.entry.name : ""}&rdquo;.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-1.5">
+						<Label htmlFor="rename-input">New name</Label>
+						<Input
+							id="rename-input"
+							value={renameName}
+							onChange={(e) => setRenameName(e.target.value)}
+							onKeyDown={(e) => e.key === "Enter" && void confirmRename()}
+							autoFocus
+						/>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={closeDialog}
+							disabled={dialogWorking}
+						>
+							Cancel
+						</Button>
+						<Button
+							onClick={() => void confirmRename()}
+							disabled={!renameName.trim() || dialogWorking}
+						>
+							{dialogWorking && (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							)}
+							Rename
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Delete Confirmation Dialog */}
+			<Dialog
+				open={dialog.type === "delete"}
+				onOpenChange={(open) => !open && closeDialog()}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Delete &ldquo;{dialog.type === "delete" ? dialog.entry.name : ""}
+							&rdquo;?
+						</DialogTitle>
+						<DialogDescription>
+							{dialog.type === "delete" && dialog.entry.kind === "folder"
+								? "This will permanently delete the folder and all its contents."
+								: "This file will be permanently deleted."}{" "}
+							This action cannot be undone.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={closeDialog}
+							disabled={dialogWorking}
+						>
+							Cancel
 						</Button>
 						<Button
 							variant="outline"
-							onClick={() => void load("/Shared with Me")}
+							className="border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
+							onClick={() => void confirmDelete()}
+							disabled={dialogWorking}
 						>
-							Shared with Me
+							{dialogWorking && (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							)}
+							Delete
 						</Button>
-						<Button onClick={() => void createFolder()}>New Folder</Button>
-						<label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm">
-							<Upload className="h-4 w-4" />
-							Upload
-							<Input
-								className="hidden"
-								type="file"
-								onChange={(event) => {
-									const file = event.target.files?.[0];
-									if (file) {
-										void uploadFile(file);
-									}
-									event.currentTarget.value = "";
-								}}
-							/>
-						</label>
-					</div>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
 
-					{uploadProgress !== null ? (
-						<div className="h-2 w-full rounded bg-muted">
-							<div
-								className="h-full rounded bg-primary transition-all"
-								style={{ width: `${uploadProgress}%` }}
+			{/* Share Dialog */}
+			<Dialog
+				open={dialog.type === "share"}
+				onOpenChange={(open) => !open && closeDialog()}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>
+							Share &ldquo;{dialog.type === "share" ? dialog.entry.name : ""}
+							&rdquo;
+						</DialogTitle>
+						<DialogDescription>
+							Grant another user access to this{" "}
+							{dialog.type === "share" ? dialog.entry.kind : "item"}.
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-4">
+						<div className="space-y-1.5">
+							<Label htmlFor="share-email">Email address</Label>
+							<Input
+								id="share-email"
+								type="email"
+								placeholder="colleague@company.com"
+								value={shareEmail}
+								onChange={(e) => setShareEmail(e.target.value)}
+								autoFocus
 							/>
 						</div>
-					) : null}
-
-					{status ? (
-						<p className="text-sm text-muted-foreground">{status}</p>
-					) : null}
-
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Name</TableHead>
-								<TableHead>Owner</TableHead>
-								<TableHead>Modified</TableHead>
-								<TableHead>Size</TableHead>
-								<TableHead className="w-15" />
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{loading ? (
-								<TableRow>
-									<TableCell colSpan={5}>Loading...</TableCell>
-								</TableRow>
-							) : entries.length === 0 ? (
-								<TableRow>
-									<TableCell colSpan={5}>This folder is empty.</TableCell>
-								</TableRow>
-							) : (
-								entries.map((entry) => (
-									<TableRow key={entry.id}>
-										<TableCell>
-											<button
-												className="flex items-center gap-2 text-left"
-												onClick={() => {
-													if (entry.kind === "folder") {
-														void load(entry.virtualPath);
-													}
-												}}
-											>
-												{entry.kind === "folder" ? (
-													<Folder className="h-4 w-4 text-muted-foreground" />
-												) : (
-													<FileText className="h-4 w-4 text-muted-foreground" />
-												)}
-												{entry.name}
-											</button>
-										</TableCell>
-										<TableCell>{entry.ownerEmail}</TableCell>
-										<TableCell>
-											{new Date(entry.updatedAt).toLocaleString()}
-										</TableCell>
-										<TableCell>
-											{entry.kind === "file"
-												? formatSize(entry.sizeBytes)
-												: "-"}
-										</TableCell>
-										<TableCell>
-											<DropdownMenu>
-												<DropdownMenuTrigger asChild>
-													<Button variant="outline" size="sm">
-														<MoreHorizontal className="h-4 w-4" />
-													</Button>
-												</DropdownMenuTrigger>
-												<DropdownMenuContent align="end">
-													{entry.kind === "file" ? (
-														<DropdownMenuItem
-															onClick={() => {
-																window.location.href = `/api/files/tree/download/${entry.id}`;
-															}}
-														>
-															Download
-														</DropdownMenuItem>
-													) : null}
-													<DropdownMenuItem
-														onClick={() => void renameEntry(entry)}
-													>
-														Rename
-													</DropdownMenuItem>
-													<DropdownMenuItem
-														onClick={() => void deleteEntry(entry)}
-													>
-														Delete
-													</DropdownMenuItem>
-													<DropdownMenuItem
-														onClick={() => void shareEntry(entry)}
-													>
-														Share
-													</DropdownMenuItem>
-												</DropdownMenuContent>
-											</DropdownMenu>
-										</TableCell>
-									</TableRow>
-								))
+						<div className="flex items-center justify-between rounded-md border border-border px-4 py-3">
+							<div>
+								<p className="text-sm font-medium">Allow editing</p>
+								<p className="text-xs text-muted-foreground">
+									Grants upload and delete permissions
+								</p>
+							</div>
+							<Switch
+								checked={shareWrite}
+								onCheckedChange={setShareWrite}
+								aria-label="Allow write access"
+							/>
+						</div>
+					</div>
+					<DialogFooter>
+						<Button
+							variant="outline"
+							onClick={closeDialog}
+							disabled={dialogWorking}
+						>
+							Cancel
+						</Button>
+						<Button
+							onClick={() => void confirmShare()}
+							disabled={!shareEmail.trim() || dialogWorking}
+						>
+							{dialogWorking && (
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 							)}
-						</TableBody>
-					</Table>
-				</CardContent>
-			</Card>
-		</div>
+							Share
+						</Button>
+					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+		</>
 	);
 }

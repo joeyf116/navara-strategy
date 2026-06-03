@@ -35,6 +35,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          NEXTAUTH_SECRET: build-time-placeholder
+          NEXTAUTH_URL: http://localhost:3000
 
   typecheck:
     name: Type Check

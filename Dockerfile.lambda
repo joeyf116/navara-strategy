@@ -12,6 +12,9 @@ RUN npm ci
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+ENV NEXTAUTH_SECRET=build-time-placeholder
+ENV NEXTAUTH_URL=http://localhost:3000
 RUN npm run build
 
 # -----------------------------------------------------------------------------

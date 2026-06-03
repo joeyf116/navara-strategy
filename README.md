@@ -106,25 +106,25 @@ push to main
 
 ### Required Repository Secrets
 
-| Secret | Description |
-|--------|-------------|
-| `AWS_DEPLOY_ROLE_ARN` | IAM role ARN assumed via OIDC (output of `terraform output github_actions_deploy_role_arn`) |
-| `SFTP_USER_PUBLIC_KEY` | Public SSH key for the AWS Transfer Family SFTP user |
+| Secret                 | Description                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN`  | IAM role ARN assumed via OIDC (output of `terraform output github_actions_deploy_role_arn`) |
+| `SFTP_USER_PUBLIC_KEY` | Public SSH key for the AWS Transfer Family SFTP user                                        |
 
 ### Required Repository Variables
 
-| Variable | Production Value |
-|----------|-----------------|
-| `AWS_REGION` | `us-east-1` |
-| `ECR_REPOSITORY` | `navara-sftp` |
-| `TF_STATE_BUCKET` | `navara-sftp-terraform-state` |
-| `TF_STATE_KEY` | `production/terraform.tfstate` |
-| `TF_LOCK_TABLE` | `navara-sftp-terraform-locks` |
-| `COGNITO_DOMAIN` | `navara-sftp-911788523695` |
-| `APP_PUBLIC_URL` | `https://d2i0sz4mcgor37.cloudfront.net` |
-| `COGNITO_CALLBACK_URLS` | `["https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]` |
-| `COGNITO_LOGOUT_URLS` | `["https://d2i0sz4mcgor37.cloudfront.net/login","http://localhost:3000/login"]` |
-| `DATABASE_URL_SECRET_ID` | `navara-sftp/database-url` *(optional, this is the default)* |
+| Variable                 | Production Value                                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `AWS_REGION`             | `us-east-1`                                                                                                             |
+| `ECR_REPOSITORY`         | `navara-sftp`                                                                                                           |
+| `TF_STATE_BUCKET`        | `navara-sftp-terraform-state`                                                                                           |
+| `TF_STATE_KEY`           | `production/terraform.tfstate`                                                                                          |
+| `TF_LOCK_TABLE`          | `navara-sftp-terraform-locks`                                                                                           |
+| `COGNITO_DOMAIN`         | `navara-sftp-911788523695`                                                                                              |
+| `APP_PUBLIC_URL`         | `https://d2i0sz4mcgor37.cloudfront.net`                                                                                 |
+| `COGNITO_CALLBACK_URLS`  | `["https://d2i0sz4mcgor37.cloudfront.net/api/auth/callback/cognito","http://localhost:3000/api/auth/callback/cognito"]` |
+| `COGNITO_LOGOUT_URLS`    | `["https://d2i0sz4mcgor37.cloudfront.net/login","http://localhost:3000/login"]`                                         |
+| `DATABASE_URL_SECRET_ID` | `navara-sftp/database-url` _(optional, this is the default)_                                                            |
 
 Set these as repository **secrets**:
 
@@ -199,35 +199,35 @@ npx prisma migrate deploy
 
 ## tfvars → GitHub Variables Mapping
 
-| Terraform variable | GitHub variable |
-|--------------------|----------------|
-| `aws_region` | `AWS_REGION` |
-| `project_name` | `ECR_REPOSITORY` |
-| `cognito_domain` | `COGNITO_DOMAIN` |
-| `app_public_url` | `APP_PUBLIC_URL` |
-| `cognito_callback_urls` | `COGNITO_CALLBACK_URLS` |
-| `cognito_logout_urls` | `COGNITO_LOGOUT_URLS` |
+| Terraform variable         | GitHub variable                 |
+| -------------------------- | ------------------------------- |
+| `aws_region`               | `AWS_REGION`                    |
+| `project_name`             | `ECR_REPOSITORY`                |
+| `cognito_domain`           | `COGNITO_DOMAIN`                |
+| `app_public_url`           | `APP_PUBLIC_URL`                |
+| `cognito_callback_urls`    | `COGNITO_CALLBACK_URLS`         |
+| `cognito_logout_urls`      | `COGNITO_LOGOUT_URLS`           |
 | `transfer_user_public_key` | `SFTP_USER_PUBLIC_KEY` (secret) |
 
 ---
 
 ## Project Paths
 
-| Path | Purpose |
-|------|---------|
-| [app](app) | All Next.js routes |
-| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>) | Dashboard files UI |
-| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>) | Dashboard uploads UI |
+| Path                                                                     | Purpose                     |
+| ------------------------------------------------------------------------ | --------------------------- |
+| [app](app)                                                               | All Next.js routes          |
+| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)       | Dashboard files UI          |
+| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)   | Dashboard uploads UI        |
 | [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>) | Settings / app passwords UI |
-| [app/login/page.tsx](app/login/page.tsx) | Login page |
-| [lib/auth.ts](lib/auth.ts) | NextAuth + Cognito config |
-| [lib/files.ts](lib/files.ts) | File access rules |
-| [lib/virtual-files.ts](lib/virtual-files.ts) | Virtual file system logic |
-| [lib/app-passwords.ts](lib/app-passwords.ts) | App password management |
-| [lib/webdav-locks.ts](lib/webdav-locks.ts) | WebDAV lock support |
-| [Dockerfile.lambda](Dockerfile.lambda) | Lambda container image |
-| [terraform/main.tf](terraform/main.tf) | All AWS infrastructure |
-| [prisma/schema.prisma](prisma/schema.prisma) | Database schema |
-| [prisma/migrations](prisma/migrations) | Migration history |
-| [.github/workflows/deploy.yml](.github/workflows/deploy.yml) | Full CI/CD deploy pipeline |
-| [.github/workflows/ci.yml](.github/workflows/ci.yml) | PR-only CI gate |
+| [app/login/page.tsx](app/login/page.tsx)                                 | Login page                  |
+| [lib/auth.ts](lib/auth.ts)                                               | NextAuth + Cognito config   |
+| [lib/files.ts](lib/files.ts)                                             | File access rules           |
+| [lib/virtual-files.ts](lib/virtual-files.ts)                             | Virtual file system logic   |
+| [lib/app-passwords.ts](lib/app-passwords.ts)                             | App password management     |
+| [lib/webdav-locks.ts](lib/webdav-locks.ts)                               | WebDAV lock support         |
+| [Dockerfile.lambda](Dockerfile.lambda)                                   | Lambda container image      |
+| [terraform/main.tf](terraform/main.tf)                                   | All AWS infrastructure      |
+| [prisma/schema.prisma](prisma/schema.prisma)                             | Database schema             |
+| [prisma/migrations](prisma/migrations)                                   | Migration history           |
+| [.github/workflows/deploy.yml](.github/workflows/deploy.yml)             | Full CI/CD deploy pipeline  |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml)                     | PR-only CI gate             |

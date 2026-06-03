@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Copy, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,10 +59,27 @@ type CognitoUsersResponse = {
 	}>;
 };
 
+type UserAccessResponse = {
+	targetUser?: {
+		grants?: Array<{ companyId: string; canWrite: boolean }>;
+	};
+};
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+	const response = await fetch(url, init);
+	const payload = (await response.json().catch(() => ({}))) as T & {
+		error?: string;
+	};
+	if (!response.ok) {
+		throw new Error(payload.error ?? "Request failed.");
+	}
+	return payload;
+}
+
 function CopyField({
 	label,
 	value,
-	placeholder = "Loading…",
+	placeholder = "Loading...",
 }: {
 	label: string;
 	value: string;
@@ -74,12 +91,12 @@ function CopyField({
 		if (!value) return;
 		void navigator.clipboard.writeText(value);
 		setCopied(true);
-		setTimeout(() => setCopied(false), 2000);
+		setTimeout(() => setCopied(false), 1500);
 	}
 
 	return (
 		<div className="space-y-1.5">
-			<Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+			<Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{label}
 			</Label>
 			<div className="flex gap-2">
@@ -95,10 +112,9 @@ function CopyField({
 					onClick={copy}
 					disabled={!value}
 					aria-label={`Copy ${label}`}
-					className="shrink-0 px-3"
 				>
 					{copied ? (
-						<Check className="h-4 w-4 text-green-500" />
+						<Check className="h-4 w-4 text-green-600" />
 					) : (
 						<Copy className="h-4 w-4" />
 					)}
@@ -110,247 +126,221 @@ function CopyField({
 
 export default function SettingsPage() {
 	const queryClient = useQueryClient();
+
 	const [newCompanyId, setNewCompanyId] = useState("");
 	const [selectedCompanyId, setSelectedCompanyId] = useState("");
 	const [userSearch, setUserSearch] = useState("");
 	const [selectedUserEmail, setSelectedUserEmail] = useState("");
-	const [selectedUserHasAccess, setSelectedUserHasAccess] = useState(false);
-	const [selectedUserCanWrite, setSelectedUserCanWrite] = useState(true);
-	const [selectedUserBaseGrants, setSelectedUserBaseGrants] = useState<
-		Array<{ companyId: string; canWrite: boolean }>
-	>([]);
-	const [loadingUserAccess, setLoadingUserAccess] = useState(false);
-	const [adminStatus, setAdminStatus] = useState<string | null>(null);
-	const [adminError, setAdminError] = useState<string | null>(null);
-	const [adminWorking, setAdminWorking] = useState(false);
+	const [permissionDraft, setPermissionDraft] = useState<{
+		hasAccess: boolean;
+		canWrite: boolean;
+	} | null>(null);
+	const [status, setStatus] = useState<string | null>(null);
+	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-	const {
-		data: conn = {
-			sftpEndpoint: "",
-			webdavUrl: "",
-			userEmail: "",
-			companies: [],
-			isSuperAdmin: false,
-		},
-	} = useQuery<ConnectionInfo>({
+	const { data: connection = null } = useQuery<ConnectionInfo>({
 		queryKey: ["connection-info"],
-		queryFn: async () => {
-			const response = await fetch("/api/settings/connection-info");
-			if (!response.ok) throw new Error("Failed to load connection info.");
-			return response.json() as Promise<ConnectionInfo>;
-		},
+		queryFn: () => requestJson<ConnectionInfo>("/api/settings/connection-info"),
 	});
 
-	const { data: companyAccess } = useQuery<CompanyAccessResponse>({
+	const { data: companyAccess = null } = useQuery<CompanyAccessResponse>({
 		queryKey: ["company-access"],
-		queryFn: async () => {
-			const response = await fetch("/api/settings/company-access");
-			if (!response.ok) throw new Error("Failed to load company access.");
-			return response.json() as Promise<CompanyAccessResponse>;
+		queryFn: () =>
+			requestJson<CompanyAccessResponse>("/api/settings/company-access"),
+	});
+
+	const { data: usersPayload = null } = useQuery<CognitoUsersResponse>({
+		queryKey: ["company-access-users"],
+		enabled: Boolean(connection?.isSuperAdmin),
+		queryFn: () =>
+			requestJson<CognitoUsersResponse>("/api/settings/company-access/users"),
+	});
+
+	const { data: selectedUserAccess, isFetching: loadingUserAccess } = useQuery<
+		UserAccessResponse,
+		Error
+	>({
+		queryKey: ["company-access-target", selectedUserEmail],
+		enabled: Boolean(selectedUserEmail.trim()),
+		queryFn: () =>
+			requestJson<UserAccessResponse>(
+				`/api/settings/company-access?userEmail=${encodeURIComponent(selectedUserEmail)}`,
+			),
+	});
+
+	const createCompanyMutation = useMutation({
+		mutationFn: async (companyId: string) => {
+			return requestJson<{ companyId?: string }>(
+				"/api/settings/company-access",
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ action: "createCompany", companyId }),
+				},
+			);
+		},
+		onSuccess: async (payload, companyId) => {
+			const createdCompany = payload.companyId ?? companyId;
+			setSelectedCompanyId(createdCompany);
+			setNewCompanyId("");
+			setStatus(`Created company ${createdCompany}.`);
+			setErrorMessage(null);
+			await queryClient.invalidateQueries({ queryKey: ["company-access"] });
+			await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
+		},
+		onError: (mutationError) => {
+			setStatus(null);
+			setErrorMessage(
+				mutationError instanceof Error
+					? mutationError.message
+					: "Failed to create company.",
+			);
 		},
 	});
 
-	const { data: cognitoUsersResponse } = useQuery<CognitoUsersResponse>({
-		queryKey: ["company-access-users"],
-		enabled: conn.isSuperAdmin,
-		queryFn: async () => {
-			const response = await fetch("/api/settings/company-access/users");
-			if (!response.ok) throw new Error("Failed to load Cognito users.");
-			return response.json() as Promise<CognitoUsersResponse>;
+	const saveUserAccessMutation = useMutation({
+		mutationFn: async (
+			grants: Array<{ companyId: string; canWrite: boolean }>,
+		) => {
+			return requestJson<{
+				grants?: Array<{ companyId: string; canWrite: boolean }>;
+			}>("/api/settings/company-access", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					action: "setUserAccess",
+					userEmail: selectedUserEmail.trim().toLowerCase(),
+					grants,
+				}),
+			});
+		},
+		onSuccess: async () => {
+			setStatus("Permissions updated.");
+			setErrorMessage(null);
+			await queryClient.invalidateQueries({ queryKey: ["company-access"] });
+			await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
+			await queryClient.invalidateQueries({
+				queryKey: ["company-access-target", selectedUserEmail],
+			});
+		},
+		onError: (mutationError) => {
+			setStatus(null);
+			setErrorMessage(
+				mutationError instanceof Error
+					? mutationError.message
+					: "Failed to save user access.",
+			);
 		},
 	});
 
 	const allCompanies = companyAccess?.allCompanies ?? [];
 	const activeCompanyId = selectedCompanyId || allCompanies[0] || "";
-
-	function syncCompanyPermissionDraft(
-		companyId: string,
-		grants: Array<{ companyId: string; canWrite: boolean }>,
-	) {
-		const grant = grants.find((item) => item.companyId === companyId);
-		setSelectedUserHasAccess(Boolean(grant));
-		setSelectedUserCanWrite(grant?.canWrite !== false);
-	}
-
-	function onCompanyChange(nextCompanyId: string) {
-		setSelectedCompanyId(nextCompanyId);
-		syncCompanyPermissionDraft(nextCompanyId, selectedUserBaseGrants);
-	}
+	const selectedGrant = useMemo(() => {
+		const grants = selectedUserAccess?.targetUser?.grants ?? [];
+		return grants.find((item) => item.companyId === activeCompanyId) ?? null;
+	}, [selectedUserAccess, activeCompanyId]);
+	const selectedUserHasAccess =
+		permissionDraft?.hasAccess ?? Boolean(selectedGrant);
+	const selectedUserCanWrite =
+		permissionDraft?.canWrite ?? selectedGrant?.canWrite !== false;
 
 	const filteredUsers = useMemo(() => {
-		const cognitoUsers = cognitoUsersResponse?.users ?? [];
-		const normalized = userSearch.trim().toLowerCase();
-		if (!normalized) return cognitoUsers;
-		return cognitoUsers.filter((user) => {
+		const users = usersPayload?.users ?? [];
+		const search = userSearch.trim().toLowerCase();
+		if (!search) return users;
+		return users.filter((user) => {
 			return (
-				user.email.toLowerCase().includes(normalized) ||
-				user.username.toLowerCase().includes(normalized)
+				user.email.toLowerCase().includes(search) ||
+				user.username.toLowerCase().includes(search)
 			);
 		});
-	}, [cognitoUsersResponse?.users, userSearch]);
+	}, [usersPayload?.users, userSearch]);
 
-	async function createCompanyAction() {
-		const companyId = newCompanyId.trim();
-		if (!companyId) return;
-
-		setAdminStatus(null);
-		setAdminError(null);
-		setAdminWorking(true);
-		const response = await fetch("/api/settings/company-access", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ action: "createCompany", companyId }),
-		});
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-			companyId?: string;
-		};
-		setAdminWorking(false);
-
-		if (!response.ok) {
-			setAdminError(payload.error ?? "Failed to create company.");
-			return;
-		}
-
-		setNewCompanyId("");
-		const createdCompany = payload.companyId ?? companyId;
-		setSelectedCompanyId(createdCompany);
-		syncCompanyPermissionDraft(createdCompany, selectedUserBaseGrants);
-		setAdminStatus(`Created company ${createdCompany}.`);
-		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
-		await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
-	}
-
-	async function loadUserAccessAction(userEmail: string) {
-		if (!userEmail.trim()) return;
-
-		setAdminStatus(null);
-		setAdminError(null);
-		setSelectedUserEmail(userEmail);
-		setLoadingUserAccess(true);
-		const response = await fetch(
-			`/api/settings/company-access?userEmail=${encodeURIComponent(userEmail)}`,
-		);
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-			targetUser?: {
-				grants?: Array<{ companyId: string; canWrite: boolean }>;
-			};
-		};
-		setLoadingUserAccess(false);
-
-		if (!response.ok) {
-			setAdminError(payload.error ?? "Failed to load user access.");
-			setSelectedUserBaseGrants([]);
-			return;
-		}
-
-		const nextGrants = payload.targetUser?.grants ?? [];
-		setSelectedUserBaseGrants(nextGrants);
-		syncCompanyPermissionDraft(activeCompanyId, nextGrants);
-	}
-
-	async function saveUserAccessAction() {
-		const userEmail = selectedUserEmail.trim().toLowerCase();
-		const companyId = activeCompanyId.trim();
-		if (!userEmail || !companyId) return;
-
-		const grants = selectedUserBaseGrants.filter(
-			(grant) => grant.companyId !== companyId,
+	async function savePermission() {
+		if (!selectedUserEmail.trim() || !activeCompanyId) return;
+		const currentGrants = selectedUserAccess?.targetUser?.grants ?? [];
+		const nextGrants = currentGrants.filter(
+			(grant) => grant.companyId !== activeCompanyId,
 		);
 		if (selectedUserHasAccess) {
-			grants.push({ companyId, canWrite: selectedUserCanWrite });
+			nextGrants.push({
+				companyId: activeCompanyId,
+				canWrite: selectedUserCanWrite,
+			});
 		}
+		await saveUserAccessMutation.mutateAsync(nextGrants);
+	}
 
-		setAdminStatus(null);
-		setAdminError(null);
-		setAdminWorking(true);
-		const response = await fetch("/api/settings/company-access", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				action: "setUserAccess",
-				userEmail,
-				grants,
-			}),
-		});
-		const payload = (await response.json().catch(() => ({}))) as {
-			error?: string;
-			grants?: Array<{ companyId: string; canWrite: boolean }>;
-		};
-		setAdminWorking(false);
+	const isAdminWorking =
+		createCompanyMutation.isPending || saveUserAccessMutation.isPending;
 
-		if (!response.ok) {
-			setAdminError(payload.error ?? "Failed to save user access.");
-			return;
-		}
-
-		setSelectedUserBaseGrants(payload.grants ?? grants);
-		syncCompanyPermissionDraft(companyId, payload.grants ?? grants);
-		setAdminStatus(`Updated ${userEmail} permissions for ${companyId}.`);
-		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
-		await queryClient.invalidateQueries({ queryKey: ["connection-info"] });
+	function onCompanyChange(companyId: string) {
+		setSelectedCompanyId(companyId);
+		setPermissionDraft(null);
 	}
 
 	return (
-		<div className="space-y-6">
-			<div>
-				<h1 className="text-2xl font-bold">File Share Connection</h1>
-				<p className="text-muted-foreground">
-					Connect your file explorer to Navara using SFTP or WebDAV.
+		<div className="space-y-4">
+			<div className="space-y-1">
+				<h1 className="text-xl font-semibold text-balance">Settings</h1>
+				<p className="text-xs text-muted-foreground">
+					Connection details and company access controls.
 				</p>
 			</div>
 
-			{conn.isSuperAdmin && (
+			{connection?.isSuperAdmin ? (
 				<Card>
 					<CardHeader>
-						<CardTitle>Company Access Management</CardTitle>
+						<CardTitle>Company Access</CardTitle>
 						<CardDescription>
-							Create company roots and assign users to one or more companies.
+							Create companies and manage user permissions by company.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="space-y-5">
-						<div className="grid gap-4 md:grid-cols-2">
+					<CardContent className="space-y-3">
+						<div className="grid gap-3 md:grid-cols-2">
 							<div className="space-y-2">
-								<Label htmlFor="new-company">Create company</Label>
+								<Label htmlFor="new-company" className="text-xs">
+									Create Company
+								</Label>
 								<div className="flex gap-2">
 									<Input
 										id="new-company"
+										name="companyId"
 										placeholder="acme-corp"
+										autoComplete="off"
 										value={newCompanyId}
 										onChange={(event) => setNewCompanyId(event.target.value)}
 									/>
 									<Button
-										onClick={() => void createCompanyAction()}
-										disabled={!newCompanyId.trim() || adminWorking}
+										size="sm"
+										onClick={() =>
+											void createCompanyMutation.mutateAsync(
+												newCompanyId.trim(),
+											)
+										}
+										disabled={
+											!newCompanyId.trim() || createCompanyMutation.isPending
+										}
 									>
-										Create
+										{createCompanyMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											"Create"
+										)}
 									</Button>
 								</div>
 							</div>
 							<div className="space-y-2">
-								<Label htmlFor="all-companies">Known companies</Label>
-								<Input
-									id="all-companies"
-									readOnly
-									value={(companyAccess?.allCompanies ?? []).join(", ")}
-									placeholder="No companies yet"
-								/>
-							</div>
-						</div>
-
-						<Separator />
-
-						<div className="grid gap-4 md:grid-cols-2">
-							<div className="space-y-2">
-								<Label htmlFor="manage-company">Manage company</Label>
+								<Label htmlFor="company-select" className="text-xs">
+									Manage Company
+								</Label>
 								<Select
 									value={activeCompanyId}
 									onValueChange={onCompanyChange}
 									disabled={allCompanies.length === 0}
 								>
-									<SelectTrigger id="manage-company">
-										<SelectValue placeholder="Create a company first" />
+									<SelectTrigger id="company-select">
+										<SelectValue placeholder="Select a company" />
 									</SelectTrigger>
 									<SelectContent>
 										{allCompanies.map((companyId) => (
@@ -361,25 +351,32 @@ export default function SettingsPage() {
 									</SelectContent>
 								</Select>
 							</div>
-							<div className="space-y-2">
-								<Label htmlFor="user-search">Search Cognito users</Label>
-								<Input
-									id="user-search"
-									placeholder="Search by email or username"
-									value={userSearch}
-									onChange={(event) => setUserSearch(event.target.value)}
-								/>
-							</div>
+						</div>
+
+						<div className="space-y-2">
+							<Label htmlFor="user-search" className="text-xs">
+								Search Users
+							</Label>
+							<Input
+								id="user-search"
+								name="userSearch"
+								type="search"
+								placeholder="email or username"
+								value={userSearch}
+								onChange={(event) => setUserSearch(event.target.value)}
+							/>
 						</div>
 
 						<div className="rounded-md border">
-							<div className="max-h-72 overflow-y-auto">
+							<div className="max-h-64 overflow-y-auto">
 								<Table>
 									<TableHeader>
 										<TableRow>
-											<TableHead>User</TableHead>
-											<TableHead>Status</TableHead>
-											<TableHead className="text-right">Action</TableHead>
+											<TableHead className="h-8 text-xs">User</TableHead>
+											<TableHead className="h-8 text-xs">Status</TableHead>
+											<TableHead className="h-8 text-right text-xs">
+												Action
+											</TableHead>
 										</TableRow>
 									</TableHeader>
 									<TableBody>
@@ -387,9 +384,9 @@ export default function SettingsPage() {
 											<TableRow>
 												<TableCell
 													colSpan={3}
-													className="text-muted-foreground"
+													className="py-3 text-xs text-muted-foreground"
 												>
-													No matching Cognito users found.
+													No matching users.
 												</TableCell>
 											</TableRow>
 										) : (
@@ -400,26 +397,29 @@ export default function SettingsPage() {
 														key={user.username}
 														className={isSelected ? "bg-accent/40" : ""}
 													>
-														<TableCell>
+														<TableCell className="py-2">
 															<div className="font-medium">{user.email}</div>
 															<div className="text-xs text-muted-foreground">
 																{user.username}
 															</div>
 														</TableCell>
-														<TableCell>
+														<TableCell className="py-2">
 															<Badge
 																variant={user.enabled ? "success" : "warning"}
 															>
 																{user.enabled ? user.status : "DISABLED"}
 															</Badge>
 														</TableCell>
-														<TableCell className="text-right">
+														<TableCell className="py-2 text-right">
 															<Button
 																size="sm"
 																variant={isSelected ? "default" : "outline"}
-																onClick={() =>
-																	void loadUserAccessAction(user.email)
-																}
+																onClick={() => {
+																	setStatus(null);
+																	setErrorMessage(null);
+																	setSelectedUserEmail(user.email);
+																	setPermissionDraft(null);
+																}}
 																disabled={loadingUserAccess}
 															>
 																{isSelected ? "Selected" : "Manage"}
@@ -434,14 +434,14 @@ export default function SettingsPage() {
 							</div>
 						</div>
 
-						{selectedUserEmail && activeCompanyId && (
-							<div className="space-y-3 rounded-md border p-4">
-								<p className="text-sm text-muted-foreground">
+						{selectedUserEmail && activeCompanyId ? (
+							<div className="space-y-2 rounded-md border p-3">
+								<p className="text-xs text-muted-foreground">
 									Managing{" "}
 									<span className="font-medium text-foreground">
 										{selectedUserEmail}
 									</span>{" "}
-									for company{" "}
+									for{" "}
 									<span className="font-medium text-foreground">
 										{activeCompanyId}
 									</span>
@@ -451,362 +451,131 @@ export default function SettingsPage() {
 									<div className="flex items-center gap-2">
 										<Switch
 											checked={selectedUserHasAccess}
-											onCheckedChange={setSelectedUserHasAccess}
+											onCheckedChange={(checked) => {
+												setPermissionDraft((current) => {
+													const baseCanWrite =
+														current?.canWrite ??
+														selectedGrant?.canWrite !== false;
+													return {
+														hasAccess: checked,
+														canWrite: checked ? baseCanWrite : false,
+													};
+												});
+											}}
 										/>
-										<Label>Company access</Label>
+										<Label>Company Access</Label>
 									</div>
 									<div className="flex items-center gap-2">
 										<Switch
 											checked={selectedUserCanWrite}
-											onCheckedChange={setSelectedUserCanWrite}
+											onCheckedChange={(checked) => {
+												setPermissionDraft((current) => ({
+													hasAccess:
+														current?.hasAccess ?? Boolean(selectedGrant),
+													canWrite: checked,
+												}));
+											}}
 											disabled={!selectedUserHasAccess}
 										/>
-										<Label>Write permission</Label>
+										<Label>Write Access</Label>
 									</div>
 									<Button
-										onClick={() => void saveUserAccessAction()}
-										disabled={adminWorking || loadingUserAccess}
+										size="sm"
+										onClick={() => void savePermission()}
+										disabled={isAdminWorking || loadingUserAccess}
 									>
-										Save Permission
+										{saveUserAccessMutation.isPending ? (
+											<Loader2 className="h-4 w-4 animate-spin" />
+										) : (
+											"Save Permission"
+										)}
 									</Button>
 								</div>
 							</div>
-						)}
+						) : null}
 
-						<div className="flex items-center gap-2">
-							{adminStatus && (
-								<p className="text-sm text-muted-foreground">{adminStatus}</p>
-							)}
-							{adminError && (
-								<p className="text-sm text-destructive">{adminError}</p>
-							)}
-						</div>
+						{status ? (
+							<p className="text-xs text-muted-foreground">{status}</p>
+						) : null}
+						{errorMessage ? (
+							<p className="text-xs text-destructive">{errorMessage}</p>
+						) : null}
 					</CardContent>
 				</Card>
-			)}
+			) : null}
 
-			{/* ── Native Drive Mapping ─────────────────────────────────────── */}
 			<Card>
 				<CardHeader>
-					<CardTitle>Mount as a Network Drive</CardTitle>
+					<CardTitle>Connection Setup</CardTitle>
 					<CardDescription>
-						Map your Navara folder directly into Windows File Explorer or macOS
-						Finder — no third-party software required for the WebDAV method.
+						Use WebDAV for native mounts or SFTP for client tools.
 					</CardDescription>
 				</CardHeader>
-				<CardContent>
-					<Tabs defaultValue="windows">
-						<TabsList className="mb-4">
-							<TabsTrigger value="windows">Windows</TabsTrigger>
-							<TabsTrigger value="macos">macOS</TabsTrigger>
+				<CardContent className="space-y-3">
+					<Tabs defaultValue="webdav">
+						<TabsList className="h-8">
+							<TabsTrigger value="webdav">WebDAV</TabsTrigger>
+							<TabsTrigger value="sftp">SFTP</TabsTrigger>
 						</TabsList>
-
-						{/* ── Windows ───────────────────────────────────────────── */}
-						<TabsContent value="windows" className="space-y-6 text-sm">
-							{/* Option A — WebDAV (built-in, no software) */}
-							<div className="space-y-3">
-								<p className="font-semibold text-foreground">
-									Option A — WebDAV (built-in, no extra software)
-								</p>
-								<ol className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed">
-									<li>
-										Open <strong>File Explorer</strong>, right-click{" "}
-										<strong>This PC</strong>, and choose{" "}
-										<strong>Map network drive…</strong>
-									</li>
-									<li>
-										Choose a drive letter (e.g. <strong>N:</strong>).
-									</li>
-									<li>
-										In the <strong>Folder</strong> field paste your WebDAV URL:
-									</li>
-								</ol>
-								{conn.webdavUrl && (
-									<CopyField label="WebDAV URL" value={conn.webdavUrl} />
-								)}
-								<ol
-									className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed"
-									start={4}
-								>
-									<li>
-										Check <strong>Reconnect at sign-in</strong>.
-									</li>
-									<li>
-										Click <strong>Finish</strong> — enter your portal email and
-										password when prompted.
-									</li>
-								</ol>
-								<p className="text-xs text-muted-foreground bg-muted rounded px-3 py-2">
-									<strong>Tip:</strong> If Windows shows an error about HTTPS
-									certificates, run this once in an Admin Command Prompt, then
-									retry:{" "}
-									<code className="font-mono">
-										reg add
-										HKLM\SYSTEM\CurrentControlSet\Services\WebClient\Parameters
-										/v BasicAuthLevel /t REG_DWORD /d 2 /f
-									</code>
-								</p>
-							</div>
-
-							<Separator />
-
-							{/* Option B — SFTP native drive via WinFsp + SSHFS-Win */}
-							<div className="space-y-3">
-								<p className="font-semibold text-foreground">
-									Option B — SFTP mapped drive (WinFsp + SSHFS-Win, free)
-								</p>
-								<ol className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed">
-									<li>
-										Install{" "}
-										<strong>
-											<a
-												href="https://winfsp.dev/rel/"
-												target="_blank"
-												rel="noopener noreferrer"
-												className="underline"
-											>
-												WinFsp
-											</a>
-										</strong>{" "}
-										then{" "}
-										<strong>
-											<a
-												href="https://github.com/winfsp/sshfs-win#installation"
-												target="_blank"
-												rel="noopener noreferrer"
-												className="underline"
-											>
-												SSHFS-Win
-											</a>
-										</strong>
-										.
-									</li>
-									<li>
-										Open <strong>File Explorer → Map network drive…</strong>,
-										choose a drive letter, and paste this UNC path:
-									</li>
-								</ol>
-								{conn.sftpEndpoint && conn.userEmail && (
-									<CopyField
-										label="SSHFS UNC path"
-										value={`\\\\sshfs\\${conn.userEmail}@${conn.sftpEndpoint}!22`}
-									/>
-								)}
-								<ol
-									className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed"
-									start={3}
-								>
-									<li>
-										Check <strong>Reconnect at sign-in</strong> → click{" "}
-										<strong>Finish</strong>.
-									</li>
-									<li>
-										Enter your portal password when prompted. Your company
-										folders appear at drive root.
-									</li>
-								</ol>
-							</div>
-
-							<Separator />
-
-							{/* Option C — Mountain Duck */}
-							<div className="space-y-2">
-								<p className="font-semibold text-foreground">
-									Option C — Mountain Duck (paid, seamless)
-								</p>
-								<p className="text-muted-foreground">
-									<a
-										href="https://mountainduck.io"
-										target="_blank"
-										rel="noopener noreferrer"
-										className="underline"
-									>
-										Mountain Duck
-									</a>{" "}
-									mounts SFTP as a native drive with offline sync. New Bookmark
-									→ <strong>SFTP</strong> → paste host{" "}
-									<code className="font-mono text-xs">{conn.sftpEndpoint}</code>
-									, port <strong>22</strong>, username = your email, password
-									authentication.
-								</p>
-							</div>
+						<TabsContent value="webdav" className="space-y-3 pt-2">
+							<CopyField
+								label="WebDAV URL"
+								value={connection?.webdavUrl ?? ""}
+							/>
+							<p className="text-xs text-muted-foreground">
+								Map this URL as a network drive in Windows File Explorer or
+								connect in macOS Finder with Connect to Server.
+							</p>
 						</TabsContent>
-
-						{/* ── macOS ─────────────────────────────────────────────── */}
-						<TabsContent value="macos" className="space-y-6 text-sm">
-							{/* Option A — Finder WebDAV */}
-							<div className="space-y-3">
-								<p className="font-semibold text-foreground">
-									Option A — WebDAV via Finder (built-in, no extra software)
-								</p>
-								<ol className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed">
-									<li>
-										In Finder, press <kbd>⌘K</kbd> (or go to{" "}
-										<strong>Go → Connect to Server…</strong>).
-									</li>
-									<li>Paste your WebDAV URL:</li>
-								</ol>
-								{conn.webdavUrl && (
-									<CopyField label="WebDAV URL" value={conn.webdavUrl} />
-								)}
-								<ol
-									className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed"
-									start={3}
-								>
-									<li>
-										Click <strong>Connect</strong> → choose{" "}
-										<strong>Registered User</strong> → enter your portal email
-										and password.
-									</li>
-									<li>
-										The share mounts under <strong>/Volumes/dav</strong> and
-										appears in the Finder sidebar.
-									</li>
-								</ol>
+						<TabsContent value="sftp" className="space-y-3 pt-2">
+							<div className="grid gap-3 sm:grid-cols-2">
+								<CopyField
+									label="Host"
+									value={connection?.sftpEndpoint ?? ""}
+								/>
+								<CopyField label="Port" value="22" />
+								<CopyField
+									label="Username"
+									value={connection?.userEmail ?? ""}
+								/>
+								<CopyField label="Password" value="Use your portal password" />
 							</div>
-
-							<Separator />
-
-							{/* Option B — SSHFS via Homebrew */}
-							<div className="space-y-3">
-								<p className="font-semibold text-foreground">
-									Option B — SFTP mount via SSHFS (Homebrew, free)
-								</p>
-								<ol className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed">
-									<li>
-										Install dependencies (one-time):{" "}
-										<code className="font-mono text-xs bg-muted px-1 rounded">
-											brew install macfuse sshfs
-										</code>
-									</li>
-									<li>Create a local mount point and mount:</li>
-								</ol>
-								{conn.sftpEndpoint && conn.userEmail && (
-									<CopyField
-										label="Terminal mount command"
-										value={`mkdir -p ~/NavaraDrive && sshfs ${conn.userEmail}@${conn.sftpEndpoint}: ~/NavaraDrive -p 22`}
-									/>
-								)}
-								<ol
-									className="list-decimal list-inside space-y-2 text-muted-foreground leading-relaxed"
-									start={3}
-								>
-									<li>
-										Enter your portal password. Your company folder appears at{" "}
-										<code className="font-mono text-xs">~/NavaraDrive</code>.
-									</li>
-									<li>
-										To unmount:{" "}
-										<code className="font-mono text-xs bg-muted px-1 rounded">
-											umount ~/NavaraDrive
-										</code>
-									</li>
-								</ol>
-							</div>
-
-							<Separator />
-
-							{/* Option C — Mountain Duck */}
-							<div className="space-y-2">
-								<p className="font-semibold text-foreground">
-									Option C — Mountain Duck (paid, seamless)
-								</p>
-								<p className="text-muted-foreground">
-									<a
-										href="https://mountainduck.io"
-										target="_blank"
-										rel="noopener noreferrer"
-										className="underline"
-									>
-										Mountain Duck
-									</a>{" "}
-									mounts SFTP as a Finder volume with offline sync. New Bookmark
-									→ <strong>SFTP</strong> → paste host{" "}
-									<code className="font-mono text-xs">{conn.sftpEndpoint}</code>
-									, port <strong>22</strong>, username = your email.
-								</p>
-							</div>
+							{connection?.sftpEndpoint && connection?.userEmail ? (
+								<CopyField
+									label="Terminal Command"
+									value={`sftp -P 22 ${connection.userEmail}@${connection.sftpEndpoint}`}
+								/>
+							) : null}
 						</TabsContent>
 					</Tabs>
-				</CardContent>
-			</Card>
 
-			{/* ── SFTP connection details ─────────────────────────────────── */}
-			<Card>
-				<CardHeader>
-					<CardTitle>AWS Transfer Family — SFTP</CardTitle>
-					<CardDescription>
-						Connect any SFTP client (Cyberduck, FileZilla, WinSCP, or the
-						terminal) using the values below. Sign in with your portal email and
-						password.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<div className="grid gap-4 sm:grid-cols-2">
-						<CopyField label="Host" value={conn.sftpEndpoint} />
-						<CopyField label="Port" value="22" placeholder="22" />
-						<CopyField
-							label="Username"
-							value={conn.userEmail}
-							placeholder="your account email"
-						/>
-						<CopyField
-							label="Password"
-							value="Your portal password"
-							placeholder="Your portal password"
-						/>
-					</div>
-					{conn.companies.length > 0 && (
-						<p className="text-xs text-muted-foreground">
-							Accessible companies: {conn.companies.join(", ")}
+					<Separator />
+
+					<div className="space-y-2 text-xs text-muted-foreground">
+						<p className="font-medium text-foreground">Client Shortcuts</p>
+						<p>
+							FileZilla / WinSCP / Cyberduck: use SFTP, host + port 22, username
+							= portal email.
 						</p>
-					)}
+						<p>
+							For persistent drive mapping on Windows, install
+							<a
+								href="https://github.com/winfsp/sshfs-win#installation"
+								target="_blank"
+								rel="noopener noreferrer"
+								className="ml-1 underline"
+							>
+								SSHFS-Win
+							</a>
+							.
+						</p>
+					</div>
 
-					{conn.sftpEndpoint && conn.userEmail ? (
-						<>
-							<Separator />
-							<CopyField
-								label="Terminal quick-connect"
-								value={`sftp -P 22 ${conn.userEmail}@${conn.sftpEndpoint}`}
-							/>
-						</>
+					{connection?.companies?.length ? (
+						<p className="text-[11px] text-muted-foreground">
+							Accessible companies: {connection.companies.join(", ")}
+						</p>
 					) : null}
-				</CardContent>
-			</Card>
-
-			{/* ── GUI client instructions ─────────────────────────────────── */}
-			<Card>
-				<CardHeader>
-					<CardTitle>GUI Client Instructions</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-4 text-sm text-muted-foreground">
-					<div className="space-y-1">
-						<p className="font-medium text-foreground">
-							Cyberduck / Mountain Duck
-						</p>
-						<p>
-							New Bookmark → <strong>SFTP</strong> → paste Host and Port → enter
-							your email as the username → Logon Type: <strong>Normal</strong> →
-							enter your portal password.
-						</p>
-					</div>
-					<Separator />
-					<div className="space-y-1">
-						<p className="font-medium text-foreground">FileZilla</p>
-						<p>
-							File → Site Manager → New Site → Protocol: <strong>SFTP</strong> →
-							paste Host, Port 22 → Logon Type: <strong>Normal</strong> → enter
-							your email and portal password.
-						</p>
-					</div>
-					<Separator />
-					<div className="space-y-1">
-						<p className="font-medium text-foreground">WinSCP</p>
-						<p>
-							New Session → File Protocol: <strong>SFTP</strong> → paste Host
-							name, Port 22 → enter your email and portal password → Login.
-						</p>
-					</div>
 				</CardContent>
 			</Card>
 		</div>

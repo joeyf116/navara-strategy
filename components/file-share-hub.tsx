@@ -1,7 +1,8 @@
 "use client";
 
-import { Upload } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -29,12 +30,72 @@ type SharedFile = {
 	uploaded_at: string;
 };
 
+function formatUploadedAt(value: string) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "-";
+	return new Intl.DateTimeFormat(undefined, {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+		hour: "numeric",
+		minute: "2-digit",
+	}).format(date);
+}
+
 export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
-	const [files, setFiles] = useState<SharedFile[]>(initialFiles);
+	const queryClient = useQueryClient();
 	const [uploadedBy, setUploadedBy] = useState("");
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [status, setStatus] = useState("");
-	const [isLoading, setIsLoading] = useState(false);
+
+	const { data: files = [] } = useQuery<SharedFile[]>({
+		queryKey: ["shared-files"],
+		initialData: initialFiles,
+		queryFn: async () => {
+			const response = await fetch("/api/files");
+			const payload = (await response.json().catch(() => ({}))) as {
+				files?: SharedFile[];
+				error?: string;
+			};
+			if (!response.ok) {
+				throw new Error(payload.error ?? "Failed to load files.");
+			}
+			return payload.files ?? [];
+		},
+	});
+
+	const uploadMutation = useMutation({
+		mutationFn: async (payload: { file: File; uploadedBy: string }) => {
+			const formData = new FormData();
+			formData.append("file", payload.file);
+			formData.append("uploadedBy", payload.uploadedBy);
+
+			const response = await fetch("/api/files", {
+				method: "POST",
+				body: formData,
+			});
+			const body = (await response.json().catch(() => ({}))) as {
+				error?: string;
+				file?: SharedFile;
+			};
+			if (!response.ok || !body.file) {
+				throw new Error(body.error ?? "Upload failed");
+			}
+			return body.file;
+		},
+		onSuccess: async (file) => {
+			setStatus(`Uploaded ${file.original_name}.`);
+			setSelectedFile(null);
+			await queryClient.invalidateQueries({ queryKey: ["shared-files"] });
+			const fileInput = document.getElementById(
+				"file",
+			) as HTMLInputElement | null;
+			if (fileInput) fileInput.value = "";
+		},
+		onError: (error) => {
+			setStatus(error instanceof Error ? error.message : "Upload failed");
+		},
+	});
 
 	const totalShared = useMemo(() => files.length, [files]);
 
@@ -47,57 +108,29 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 		}
 
 		setStatus("");
-		setIsLoading(true);
-
-		const formData = new FormData();
-		formData.append("file", selectedFile);
-		formData.append("uploadedBy", uploadedBy.trim());
-
-		try {
-			const response = await fetch("/api/files", {
-				method: "POST",
-				body: formData,
-			});
-			const payload = await response.json();
-
-			if (!response.ok) {
-				throw new Error(payload.error ?? "Upload failed");
-			}
-
-			setFiles((current) => [payload.file as SharedFile, ...current]);
-			setSelectedFile(null);
-			setStatus(`Uploaded ${payload.file.original_name}.`);
-
-			const fileInput = document.getElementById(
-				"file",
-			) as HTMLInputElement | null;
-			if (fileInput) {
-				fileInput.value = "";
-			}
-		} catch (error) {
-			setStatus(error instanceof Error ? error.message : "Upload failed");
-		} finally {
-			setIsLoading(false);
-		}
+		await uploadMutation.mutateAsync({
+			file: selectedFile,
+			uploadedBy: uploadedBy.trim(),
+		});
 	}
 
 	return (
-		<main className="min-h-screen bg-background px-4 py-10 text-foreground">
-			<div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+		<main className="min-h-screen bg-background px-4 py-6 text-foreground">
+			<div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
 				<Card>
-					<CardHeader>
+					<CardHeader className="pb-3">
 						<CardTitle>Navara File Share Hub</CardTitle>
 						<CardDescription>
-							Upload documents, then share through your SFTP workflow in AWS
-							Transfer Family.
+							Upload and track shared files in one place.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="space-y-4">
+					<CardContent className="space-y-3">
 						<form
-							className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
+							className="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
 							onSubmit={handleSubmit}
 						>
 							<Input
+								name="uploadedBy"
 								aria-label="Uploader name"
 								placeholder="Client name"
 								value={uploadedBy}
@@ -106,6 +139,7 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 							/>
 							<Input
 								id="file"
+								name="file"
 								aria-label="File to upload"
 								type="file"
 								onChange={(event) =>
@@ -113,50 +147,66 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 								}
 								required
 							/>
-							<Button type="submit" disabled={isLoading}>
+							<Button
+								type="submit"
+								size="sm"
+								disabled={uploadMutation.isPending}
+							>
 								<Upload className="h-4 w-4" />
-								{isLoading ? "Uploading..." : "Upload"}
+								{uploadMutation.isPending ? (
+									<Loader2 className="h-4 w-4 animate-spin" />
+								) : null}
+								{uploadMutation.isPending ? "Uploading..." : "Upload"}
 							</Button>
 						</form>
-						<p className="text-sm text-muted-foreground">
+						<p className="text-xs text-muted-foreground">
 							Shared files:{" "}
 							<span className="font-medium text-foreground">{totalShared}</span>
 						</p>
 						{status ? (
-							<p className="text-sm text-muted-foreground">{status}</p>
+							<p className="text-xs text-muted-foreground">{status}</p>
 						) : null}
 					</CardContent>
 				</Card>
 
 				<Card>
-					<CardHeader>
+					<CardHeader className="pb-3">
 						<CardTitle>Recent uploads</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<Table>
 							<TableHeader>
 								<TableRow>
-									<TableHead>File</TableHead>
-									<TableHead>Uploaded by</TableHead>
-									<TableHead>Size</TableHead>
-									<TableHead>Uploaded at</TableHead>
+									<TableHead className="h-8 text-xs">File</TableHead>
+									<TableHead className="h-8 text-xs">Uploaded by</TableHead>
+									<TableHead className="h-8 text-xs">Size</TableHead>
+									<TableHead className="h-8 text-xs">Uploaded at</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{files.length === 0 ? (
 									<TableRow>
-										<TableCell colSpan={4}>No files uploaded yet.</TableCell>
+										<TableCell
+											colSpan={4}
+											className="py-4 text-xs text-muted-foreground"
+										>
+											No files uploaded yet.
+										</TableCell>
 									</TableRow>
 								) : (
 									files.map((file) => (
 										<TableRow key={file.id}>
-											<TableCell>{file.original_name}</TableCell>
-											<TableCell>{file.uploaded_by}</TableCell>
-											<TableCell>
+											<TableCell className="py-2 text-sm">
+												{file.original_name}
+											</TableCell>
+											<TableCell className="py-2 text-xs text-muted-foreground">
+												{file.uploaded_by}
+											</TableCell>
+											<TableCell className="py-2 text-xs text-muted-foreground">
 												{Math.max(1, Math.round(file.size_bytes / 1024))} KB
 											</TableCell>
-											<TableCell>
-												{new Date(file.uploaded_at).toLocaleString()}
+											<TableCell className="py-2 text-xs text-muted-foreground">
+												{formatUploadedAt(file.uploaded_at)}
 											</TableCell>
 										</TableRow>
 									))

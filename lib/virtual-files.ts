@@ -464,7 +464,7 @@ export async function listViewerDirectory(
 				"folder",
 				grant.companyId,
 				0,
-				new Date(0).toISOString(),
+				new Date().toISOString(),
 				grant.canWrite,
 				`/${grant.companyId}`,
 			),
@@ -479,6 +479,16 @@ export async function listViewerDirectory(
 
 	const relSegments = segments.slice(1);
 	const listing = await listS3Dir(companyId, relSegments);
+	const folderUpdatedAtMap = new Map<string, string>();
+	await Promise.all(
+		listing.folders.map(async (folderPrefix) => {
+			const folderMeta = await headS3Object(folderPrefix);
+			folderUpdatedAtMap.set(
+				folderPrefix,
+				(folderMeta?.lastModified ?? new Date()).toISOString(),
+			);
+		}),
+	);
 	const nodes: ViewerNode[] = [];
 	const prefix =
 		relSegments.length > 0
@@ -495,7 +505,7 @@ export async function listViewerDirectory(
 				"folder",
 				companyId,
 				0,
-				new Date(0).toISOString(),
+				folderUpdatedAtMap.get(folderPrefix) ?? new Date().toISOString(),
 				grant.canWrite,
 				normalizeVirtualPath(
 					`/${companyId}/${[...relSegments, relPath].join("/")}`,
@@ -536,7 +546,7 @@ export async function listViewerDirectory(
 					"folder",
 					companyId,
 					0,
-					new Date(0).toISOString(),
+					new Date().toISOString(),
 					grant.canWrite,
 					`/${companyId}/${rootFolder}`,
 				),

@@ -55,24 +55,27 @@ export function DashboardSidebar() {
 
 	const sidebarContent = (
 		<>
-			<div className="flex h-14 items-center px-4">
+			<div className="flex h-12 items-center px-3">
 				<Link href="/files" className="flex items-center gap-2">
-					<div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-						<span className="text-sm font-bold text-primary-foreground">N</span>
+					<div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary">
+						<span className="text-xs font-bold text-primary-foreground">N</span>
 					</div>
-					<span className="text-lg font-semibold">Navara Files</span>
+					<span className="text-sm font-semibold tracking-tight">
+						Navara Files
+					</span>
 				</Link>
 				<Button
 					variant="outline"
 					size="sm"
-					className="ml-auto lg:hidden"
+					className="ml-auto h-7 w-7 p-0 lg:hidden"
 					onClick={() => setMobileOpen(false)}
+					aria-label="Close navigation"
 				>
 					<X className="h-4 w-4" />
 				</Button>
 			</div>
 			<Separator />
-			<ScrollArea className="flex-1 px-3 py-2">
+			<ScrollArea className="flex-1 px-2.5 py-2">
 				<nav className="flex flex-col gap-1">
 					{navigation.map((item) => {
 						const isActive =
@@ -85,13 +88,13 @@ export function DashboardSidebar() {
 								href={item.href}
 								onClick={() => setMobileOpen(false)}
 								className={cn(
-									"flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+									"flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
 									isActive
 										? "bg-accent text-accent-foreground"
 										: "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
 								)}
 							>
-								<item.icon className="h-4 w-4" />
+								<item.icon className="h-3.5 w-3.5" />
 								{item.name}
 							</Link>
 						);
@@ -99,11 +102,11 @@ export function DashboardSidebar() {
 				</nav>
 			</ScrollArea>
 			<Separator />
-			<div className="p-3 space-y-2">
+			<div className="space-y-1.5 p-2.5">
 				<Button
 					variant="outline"
 					size="sm"
-					className="w-full justify-start gap-2"
+					className="h-8 w-full justify-start gap-2 text-xs"
 					onClick={() => {
 						if (theme === "system") setTheme("dark");
 						else if (theme === "dark") setTheme("light");
@@ -114,27 +117,29 @@ export function DashboardSidebar() {
 					<Moon className="h-4 w-4 hidden dark:block" />
 					{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}
 				</Button>
-				<div className="flex items-center gap-2 rounded-md px-3 py-2">
-					<Avatar className="h-8 w-8">
+				<div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5">
+					<Avatar className="h-7 w-7">
 						<AvatarFallback>{getInitials(user?.name)}</AvatarFallback>
 					</Avatar>
-					<div className="flex-1 min-w-0">
-						<p className="truncate text-sm font-medium">
+					<div className="min-w-0 flex-1">
+						<p className="truncate text-xs font-medium">
 							{user?.name ?? "User"}
 						</p>
-						<div className="flex items-center gap-1.5">
-							<p className="truncate text-xs text-muted-foreground">
+						<div className="flex items-center gap-1">
+							<p className="truncate text-[11px] text-muted-foreground">
 								{user?.email ?? ""}
 							</p>
 						</div>
-						<Badge variant="outline" className="mt-0.5 text-[10px] px-1.5 py-0">
+						<Badge variant="outline" className="mt-0.5 px-1 py-0 text-[10px]">
 							{roleBadgeLabel(user?.role)}
 						</Badge>
 					</div>
 					<Button
 						variant="outline"
 						size="sm"
+						className="h-7 w-7 p-0"
 						onClick={() => signOut({ callbackUrl: "/login" })}
+						aria-label="Sign out"
 						title="Sign out"
 					>
 						<LogOut className="h-3.5 w-3.5" />
@@ -150,8 +155,9 @@ export function DashboardSidebar() {
 			<Button
 				variant="outline"
 				size="sm"
-				className="fixed left-4 top-3 z-50 lg:hidden"
+				className="fixed left-3 top-3 z-50 h-8 w-8 p-0 lg:hidden"
 				onClick={() => setMobileOpen(true)}
+				aria-label="Open navigation"
 			>
 				<Menu className="h-4 w-4" />
 			</Button>
@@ -167,7 +173,7 @@ export function DashboardSidebar() {
 			{/* Mobile sidebar */}
 			<aside
 				className={cn(
-					"fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-card transition-transform lg:hidden",
+					"fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-card/95 backdrop-blur transition-transform lg:hidden",
 					mobileOpen ? "translate-x-0" : "-translate-x-full",
 				)}
 			>
@@ -175,7 +181,7 @@ export function DashboardSidebar() {
 			</aside>
 
 			{/* Desktop sidebar */}
-			<aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-border lg:bg-card">
+			<aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-60 lg:flex-col lg:border-r lg:border-border lg:bg-card">
 				{sidebarContent}
 			</aside>
 		</>

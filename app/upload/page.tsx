@@ -3,20 +3,25 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { FileShareHub } from "@/components/file-share-hub";
 import { listSharedFiles } from "@/lib/files";
+import { QueryProvider } from "@/lib/query-provider";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const session = await auth();
+	const session = await auth();
 
-  if (!session?.user?.email || !session.user.role) {
-    redirect("/login");
-  }
+	if (!session?.user?.email || !session.user.role) {
+		redirect("/login");
+	}
 
-  const initialFiles = await listSharedFiles({
-    viewerEmail: session.user.email,
-    viewerRole: session.user.role,
-  });
+	const initialFiles = await listSharedFiles({
+		viewerEmail: session.user.email,
+		viewerRole: session.user.role,
+	});
 
-  return <FileShareHub initialFiles={initialFiles} />;
+	return (
+		<QueryProvider>
+			<FileShareHub initialFiles={initialFiles} />
+		</QueryProvider>
+	);
 }

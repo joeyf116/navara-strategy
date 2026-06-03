@@ -801,7 +801,7 @@ resource "aws_codebuild_project" "db_migrate" {
             - git clone --depth 1 "$REPO_URL" /tmp/navara-strategy
             - cd /tmp/navara-strategy
             - if [ -n "$REPO_SHA" ]; then git fetch --depth 1 origin "$REPO_SHA"; git checkout "$REPO_SHA"; fi
-            - export DATABASE_URL=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DATABASE_URL_SECRET_ID" --query SecretString --output text)
+            - export DATABASE_URL="$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DATABASE_URL_SECRET_ID" --query SecretString --output text)?sslmode=require"
             - npm ci
             - |
               set +e

@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   TERRAFORM_VERSION: "1.8.5"
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
@@ -95,7 +95,7 @@ jobs:
           terraform apply -auto-approve -input=false \
             -target=aws_ecr_repository.app \
             -target=aws_ecr_lifecycle_policy.app \
-            -var="app_image_identifier=public.ecr.aws/docker/library/node:20-alpine" \
+            -var="app_image_identifier=public.ecr.aws/docker/library/node:22-alpine" \
             -var="transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}" \
             -var="cognito_domain=${{ env.COGNITO_DOMAIN }}" \
             -var='cognito_callback_urls=${{ env.COGNITO_CALLBACK_URLS }}' \

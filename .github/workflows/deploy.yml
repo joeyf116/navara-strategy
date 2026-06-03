@@ -204,6 +204,10 @@ jobs:
         if: steps.plan.outputs.exitcode == '2'
         run: terraform apply -auto-approve -input=false tfplan
 
+      - name: No-op (plan detected no changes)
+        if: steps.plan.outputs.exitcode == '0'
+        run: echo "Terraform plan detected no infrastructure changes — apply skipped."
+
       - name: Show App URL
         if: steps.plan.outputs.exitcode == '0' || steps.plan.outputs.exitcode == '2'
         run: |

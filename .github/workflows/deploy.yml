@@ -189,17 +189,26 @@ jobs:
           ROLE_POLICY_NAME="${ROLE_NAME}-policy"
           PROJECT_NAME="${{ env.DB_MIGRATION_PROJECT_NAME }}"
 
+          TF_IMPORT_ARGS=(
+            "-var=app_image_identifier=${{ needs.build-push.outputs.image_uri }}"
+            "-var=transfer_user_public_key=${{ secrets.SFTP_USER_PUBLIC_KEY }}"
+            "-var=cognito_domain=${{ env.COGNITO_DOMAIN }}"
+            "-var=cognito_callback_urls=${{ env.COGNITO_CALLBACK_URLS }}"
+            "-var=cognito_logout_urls=${{ env.COGNITO_LOGOUT_URLS }}"
+            "-var=app_public_url=${{ env.APP_PUBLIC_URL }}"
+          )
+
           # Import role if it exists in AWS but is missing from Terraform state.
           if ! terraform state list | grep -qx 'aws_iam_role.codebuild_migrate'; then
             if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
-              terraform import -input=false aws_iam_role.codebuild_migrate "$ROLE_NAME"
+              terraform import -input=false "${TF_IMPORT_ARGS[@]}" aws_iam_role.codebuild_migrate "$ROLE_NAME"
             fi
           fi
 
           # Import inline role policy if it exists in AWS but is missing from state.
           if ! terraform state list | grep -qx 'aws_iam_role_policy.codebuild_migrate'; then
             if aws iam get-role-policy --role-name "$ROLE_NAME" --policy-name "$ROLE_POLICY_NAME" >/dev/null 2>&1; then
-              terraform import -input=false aws_iam_role_policy.codebuild_migrate "${ROLE_NAME}:${ROLE_POLICY_NAME}"
+              terraform import -input=false "${TF_IMPORT_ARGS[@]}" aws_iam_role_policy.codebuild_migrate "${ROLE_NAME}:${ROLE_POLICY_NAME}"
             fi
           fi
 
@@ -207,7 +216,7 @@ jobs:
           if ! terraform state list | grep -qx 'aws_codebuild_project.db_migrate'; then
             PROJECT_EXISTS=$(aws codebuild batch-get-projects --names "$PROJECT_NAME" --query 'length(projects)' --output text)
             if [ "$PROJECT_EXISTS" = "1" ]; then
-              terraform import -input=false aws_codebuild_project.db_migrate "$PROJECT_NAME"
+              terraform import -input=false "${TF_IMPORT_ARGS[@]}" aws_codebuild_project.db_migrate "$PROJECT_NAME"
             fi
           fi
 

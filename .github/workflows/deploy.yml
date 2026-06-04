@@ -162,13 +162,18 @@ jobs:
 
       - name: Import pre-existing secrets (idempotent)
         run: |
-          if ! terraform state show aws_secretsmanager_secret.db_url > /dev/null 2>&1; then
-            SECRET_ARN=$(aws secretsmanager describe-secret \
-              --secret-id "navara-sftp/database-url" \
-              --query 'ARN' --output text 2>/dev/null || echo "")
-            if [ -n "$SECRET_ARN" ] && [ "$SECRET_ARN" != "None" ]; then
-              terraform import aws_secretsmanager_secret.db_url "$SECRET_ARN"
-            fi
+          SECRET_ARN=$(aws secretsmanager describe-secret \
+            --secret-id "navara-sftp/database-url" \
+            --query 'ARN' --output text 2>/dev/null || echo "")
+          if [ -n "$SECRET_ARN" ] && [ "$SECRET_ARN" != "None" ]; then
+            terraform import \
+              -input=false \
+              -var="app_image_identifier=${{ needs.build-push.outputs.image_uri }}" \
+              -var="cognito_domain=${{ env.COGNITO_DOMAIN }}" \
+              -var='cognito_callback_urls=${{ env.COGNITO_CALLBACK_URLS }}' \
+              -var='cognito_logout_urls=${{ env.COGNITO_LOGOUT_URLS }}' \
+              -var="app_public_url=${{ env.APP_PUBLIC_URL }}" \
+              aws_secretsmanager_secret.db_url "$SECRET_ARN" || true
           fi
 
       - name: Terraform Plan

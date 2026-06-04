@@ -44,3 +44,8 @@ cognito_logout_urls     = [
 
 # Observability
 log_retention_days      = 30
+
+# PostgreSQL (RDS)
+db_name           = "excel_db"
+db_username       = "db_admin"
+db_instance_class = "db.t3.micro"

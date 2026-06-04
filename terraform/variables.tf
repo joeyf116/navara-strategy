@@ -132,3 +132,23 @@ variable "cognito_logout_urls" {
   description = "Allowed logout redirect URLs for the Cognito app client"
   type        = list(string)
 }
+
+# ---------- PostgreSQL (RDS) ----------
+
+variable "db_name" {
+  description = "PostgreSQL database name"
+  type        = string
+  default     = "excel_db"
+}
+
+variable "db_username" {
+  description = "PostgreSQL master username"
+  type        = string
+  default     = "db_admin"
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = string
+  default     = "db.t3.micro"
+}

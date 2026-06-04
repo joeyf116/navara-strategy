@@ -1,10 +1,13 @@
 import {
+	AdminCreateUserCommand,
+	AdminDeleteUserCommand,
 	AdminGetUserCommand,
 	AdminListGroupsForUserCommand,
 	CognitoIdentityProviderClient,
 	ListUsersCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import {
+	DeleteObjectCommand,
 	GetObjectCommand,
 	ListObjectsV2Command,
 	PutObjectCommand,
@@ -24,10 +27,17 @@ export type UserCompanyAccess = {
 export type CognitoUserSummary = {
 	username: string;
 	email: string;
+	name: string | null;
 	enabled: boolean;
 	status: string;
 	createdAt: string | null;
 	updatedAt: string | null;
+};
+
+export type CreateCognitoUserInput = {
+	email: string;
+	name?: string;
+	temporaryPassword: string;
 };
 
 const filesBucket = process.env.FILES_BUCKET?.trim() || "";
@@ -148,6 +158,23 @@ async function writeS3Json(key: string, value: unknown): Promise<void> {
 	);
 }
 
+async function deleteS3Object(key: string): Promise<void> {
+	if (!filesBucket || !s3Client) return;
+	try {
+		await s3Client.send(
+			new DeleteObjectCommand({
+				Bucket: filesBucket,
+				Key: key,
+			}),
+		);
+	} catch (error: unknown) {
+		if ((error as { name?: string }).name === "NoSuchKey") {
+			return;
+		}
+		throw error;
+	}
+}
+
 function getPoolIdFromIssuer(): string | null {
 	const issuer = process.env.AUTH_COGNITO_ISSUER?.trim();
 	if (!issuer) return null;
@@ -182,6 +209,26 @@ async function findCognitoUsernameByEmail(
 	const user = response.Users?.[0];
 	const username = String(user?.Username ?? "").trim();
 	return username || null;
+}
+
+async function resolveCognitoUsername(
+	poolId: string,
+	emailRaw: string,
+): Promise<string | null> {
+	const email = normalizeEmail(emailRaw);
+	if (!email) return null;
+
+	try {
+		await cognitoClient.send(
+			new AdminGetUserCommand({
+				UserPoolId: poolId,
+				Username: email,
+			}),
+		);
+		return email;
+	} catch {
+		return findCognitoUsernameByEmail(poolId, email);
+	}
 }
 
 async function readCognitoAccess(emailRaw: string): Promise<UserCompanyAccess> {
@@ -257,6 +304,12 @@ async function readStoredAccess(emailRaw: string): Promise<CompanyGrant[]> {
 			.map((grant) => parseCompanyGrant(grant))
 			.filter((grant): grant is CompanyGrant => grant !== null),
 	);
+}
+
+async function deleteStoredAccess(emailRaw: string): Promise<void> {
+	const email = normalizeEmail(emailRaw);
+	if (!email) return;
+	await deleteS3Object(companyAccessKey(email));
 }
 
 async function readCompanyIndex(): Promise<string[]> {
@@ -457,6 +510,87 @@ export async function getUserCompanyAccessForAdmin(
 	};
 }
 
+export async function createCognitoUser({
+	email: emailRaw,
+	name,
+	temporaryPassword,
+}: CreateCognitoUserInput): Promise<CognitoUserSummary> {
+	const poolId = getPoolIdFromIssuer();
+	if (!poolId) {
+		throw new Error("Cognito user pool is not configured.");
+	}
+
+	const email = normalizeEmail(emailRaw);
+	if (!email) {
+		throw new Error("User email is required.");
+	}
+
+	const tempPassword = temporaryPassword.trim();
+	if (!tempPassword) {
+		throw new Error("Temporary password is required.");
+	}
+
+	const response = await cognitoClient.send(
+		new AdminCreateUserCommand({
+			UserPoolId: poolId,
+			Username: email,
+			TemporaryPassword: tempPassword,
+			MessageAction: "SUPPRESS",
+			UserAttributes: [
+				{ Name: "email", Value: email },
+				{ Name: "email_verified", Value: "true" },
+				...(name?.trim() ? [{ Name: "name", Value: name.trim() }] : []),
+			],
+		}),
+	);
+
+	const attributes = Object.fromEntries(
+		(response.User?.Attributes ?? []).map((attribute) => [
+			attribute.Name,
+			attribute.Value ?? "",
+		]),
+	);
+
+	return {
+		username: String(response.User?.Username ?? email),
+		email,
+		name: String(attributes.name ?? "").trim() || null,
+		enabled: response.User?.Enabled !== false,
+		status: String(response.User?.UserStatus ?? "FORCE_CHANGE_PASSWORD"),
+		createdAt: parseCognitoDate(response.User?.UserCreateDate),
+		updatedAt: parseCognitoDate(response.User?.UserLastModifiedDate),
+	};
+}
+
+export async function deleteCognitoUser(
+	userEmailRaw: string,
+): Promise<{ userEmail: string }> {
+	const poolId = getPoolIdFromIssuer();
+	if (!poolId) {
+		throw new Error("Cognito user pool is not configured.");
+	}
+
+	const userEmail = normalizeEmail(userEmailRaw);
+	if (!userEmail) {
+		throw new Error("User email is required.");
+	}
+
+	const username = await resolveCognitoUsername(poolId, userEmail);
+	if (!username) {
+		throw new Error("User not found in Cognito.");
+	}
+
+	await cognitoClient.send(
+		new AdminDeleteUserCommand({
+			UserPoolId: poolId,
+			Username: username,
+		}),
+	);
+	await deleteStoredAccess(userEmail);
+
+	return { userEmail };
+}
+
 function parseCognitoDate(value: Date | undefined): string | null {
 	if (!value) return null;
 	const timestamp = value.getTime();
@@ -493,6 +627,7 @@ export async function listCognitoUsers(): Promise<CognitoUserSummary[]> {
 			users.push({
 				username,
 				email,
+				name: String(attributes.name ?? "").trim() || null,
 				enabled: user.Enabled !== false,
 				status: String(user.UserStatus ?? "UNKNOWN"),
 				createdAt: parseCognitoDate(user.UserCreateDate),

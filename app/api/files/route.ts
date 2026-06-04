@@ -5,7 +5,8 @@ import { canManageFiles, createSharedFile, listSharedFiles } from "@/lib/files";
 import { logger } from "@/lib/logger";
 
 const MAX_FILE_BYTES =
-	(Number(process.env.MAX_UPLOAD_SIZE_MB ?? 25) || 25) * 1024 * 1024;
+	(Number(process.env.MAX_UPLOAD_SIZE_MB ?? 1024) || 1024) * 1024 * 1024;
+const MAX_FILE_MB = MAX_FILE_BYTES / (1024 * 1024);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function GET() {
@@ -91,9 +92,7 @@ export async function POST(request: Request) {
 		if (file.size === 0 || file.size > MAX_FILE_BYTES) {
 			return NextResponse.json(
 				{
-					error: `File must be between 1 byte and ${
-						MAX_FILE_BYTES / (1024 * 1024)
-					}MB.`,
+					error: `File must be between 1 byte and ${MAX_FILE_MB}MB.`,
 				},
 				{ status: 400 },
 			);

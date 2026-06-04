@@ -82,3 +82,24 @@ output "sftp_mount_instructions" {
   value       = "Windows (WebDAV): Map network drive to ${aws_cloudfront_distribution.web.domain_name}/api/dav | Windows (SSHFS-Win): \\\\sshfs\\<email>@${aws_transfer_server.this.endpoint}!22 | macOS: Finder ⌘K → https://${aws_cloudfront_distribution.web.domain_name}/api/dav"
   description = "Quick-reference mount strings for Windows File Explorer and macOS Finder"
 }
+
+output "rds_endpoint" {
+  value       = aws_db_instance.excel.address
+  description = "RDS PostgreSQL public endpoint — use this as the ODBC host"
+}
+
+output "rds_database" {
+  value       = aws_db_instance.excel.db_name
+  description = "PostgreSQL database name"
+}
+
+output "rds_username" {
+  value       = aws_db_instance.excel.username
+  description = "PostgreSQL master username"
+}
+
+output "rds_connection_string" {
+  value       = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.excel.address}:5432/${var.db_name}?sslmode=require"
+  sensitive   = true
+  description = "Full PostgreSQL connection string (password included – handle carefully)"
+}

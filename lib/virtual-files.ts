@@ -51,6 +51,9 @@ const filesBucketPrefix = (
 const s3Client = filesBucket ? new S3Client({}) : null;
 
 const ROOT_FOLDERS = ["to_navara", "from_navara"];
+const MAX_UPLOAD_BYTES =
+	(Number(process.env.MAX_UPLOAD_SIZE_MB ?? 1024) || 1024) * 1024 * 1024;
+const MAX_UPLOAD_MB = MAX_UPLOAD_BYTES / (1024 * 1024);
 
 function splitPath(rawPath: string): string[] {
 	return rawPath
@@ -641,6 +644,10 @@ async function uploadFileAtPath(
 	const grant = await getAccessGrant(viewerEmailRaw, companyId);
 	if (!grant || !grant.canWrite) {
 		throw new Error("You do not have write access to this company.");
+	}
+
+	if (file.size === 0 || file.size > MAX_UPLOAD_BYTES) {
+		throw new Error(`File must be between 1 byte and ${MAX_UPLOAD_MB}MB.`);
 	}
 
 	const relSegments = [...targetSegments.slice(1), file.name];

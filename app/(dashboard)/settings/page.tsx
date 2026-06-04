@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 
 import { UserAccessManagementTable } from "@/components/user-access-management-table";
@@ -24,6 +24,23 @@ type ConnectionInfo = {
 	userEmail: string;
 	companies: string[];
 	isSuperAdmin: boolean;
+	database: {
+		host: string;
+		port: string;
+		database: string;
+		username: string;
+		password: string;
+		sslMode: string;
+		connectionString: string;
+	} | null;
+};
+
+type DatabaseVerifyResponse = {
+	ok: boolean;
+	database: string;
+	username: string;
+	serverVersion: string;
+	verifiedAt: string;
 };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -90,6 +107,31 @@ export default function SettingsPage() {
 		queryKey: ["connection-info"],
 		queryFn: () => requestJson<ConnectionInfo>("/api/settings/connection-info"),
 	});
+	const [dbStatus, setDbStatus] = useState<{
+		message: string;
+		error?: boolean;
+	} | null>(null);
+
+	const verifyDatabaseMutation = useMutation({
+		mutationFn: () =>
+			requestJson<DatabaseVerifyResponse>("/api/settings/database/verify", {
+				method: "POST",
+			}),
+		onSuccess: (result) => {
+			setDbStatus({
+				message: `Connection verified for ${result.username} on ${result.database} at ${new Date(result.verifiedAt).toLocaleString()}.`,
+			});
+		},
+		onError: (error) => {
+			setDbStatus({
+				message:
+					error instanceof Error
+						? error.message
+						: "Database verification failed.",
+				error: true,
+			});
+		},
+	});
 
 	return (
 		<div className="space-y-4">
@@ -106,7 +148,8 @@ export default function SettingsPage() {
 				<CardHeader>
 					<CardTitle>Connection Setup</CardTitle>
 					<CardDescription>
-						Use WebDAV for native mounts or SFTP for client tools.
+						Use WebDAV for native mounts, SFTP for file clients, and database
+						settings for admin SQL access.
 					</CardDescription>
 				</CardHeader>
 				<CardContent className="space-y-3">
@@ -114,6 +157,9 @@ export default function SettingsPage() {
 						<TabsList className="h-8">
 							<TabsTrigger value="webdav">WebDAV</TabsTrigger>
 							<TabsTrigger value="sftp">SFTP</TabsTrigger>
+							{connection?.isSuperAdmin ? (
+								<TabsTrigger value="database">Database</TabsTrigger>
+							) : null}
 						</TabsList>
 						<TabsContent value="webdav" className="space-y-3 pt-2">
 							<CopyField
@@ -145,6 +191,80 @@ export default function SettingsPage() {
 								/>
 							) : null}
 						</TabsContent>
+						{connection?.isSuperAdmin ? (
+							<TabsContent value="database" className="space-y-3 pt-2">
+								{connection.database ? (
+									<>
+										<div className="grid gap-3 sm:grid-cols-2">
+											<CopyField
+												label="Host"
+												value={connection.database.host}
+											/>
+											<CopyField
+												label="Port"
+												value={connection.database.port}
+											/>
+											<CopyField
+												label="Database"
+												value={connection.database.database}
+											/>
+											<CopyField
+												label="Username"
+												value={connection.database.username}
+											/>
+											<CopyField
+												label="Password"
+												value={connection.database.password}
+											/>
+											<CopyField
+												label="SSL Mode"
+												value={connection.database.sslMode}
+											/>
+										</div>
+
+										<CopyField
+											label="Connection String"
+											value={connection.database.connectionString}
+										/>
+										<CopyField
+											label="PSQL Command"
+											value={`psql "${connection.database.connectionString}"`}
+										/>
+
+										<div className="flex flex-wrap items-center gap-2">
+											<Button
+												variant="outline"
+												onClick={() => {
+													setDbStatus(null);
+													void verifyDatabaseMutation.mutateAsync();
+												}}
+												disabled={verifyDatabaseMutation.isPending}
+											>
+												{verifyDatabaseMutation.isPending
+													? "Verifying..."
+													: "Verify Database Connection"}
+											</Button>
+											<p className="text-xs text-muted-foreground">
+												Verifies real connectivity using the server-side
+												DATABASE_URL.
+											</p>
+										</div>
+
+										{dbStatus ? (
+											<p
+												className={`text-xs ${dbStatus.error ? "text-destructive" : "text-muted-foreground"}`}
+											>
+												{dbStatus.message}
+											</p>
+										) : null}
+									</>
+								) : (
+									<p className="text-xs text-muted-foreground">
+										DATABASE_URL is not configured in the application runtime.
+									</p>
+								)}
+							</TabsContent>
+						) : null}
 					</Tabs>
 
 					<Separator />

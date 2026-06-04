@@ -3,7 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { Moon, Sun, LogOut, Menu, X, FolderTree, Settings } from "lucide-react";
+import {
+	Moon,
+	Sun,
+	LogOut,
+	Loader2,
+	Menu,
+	X,
+	FolderTree,
+	FileSpreadsheet,
+	Settings,
+} from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -16,6 +26,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 const navigation = [
 	{ name: "Files", href: "/files", icon: FolderTree },
+	{ name: "Imports", href: "/uploads", icon: FileSpreadsheet },
 	{ name: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -50,8 +61,35 @@ export function DashboardSidebar() {
 	const { theme, setTheme } = useTheme();
 	const { data: session } = useSession();
 	const [mobileOpen, setMobileOpen] = useState(false);
+	const [signingOut, setSigningOut] = useState(false);
 
 	const user = session?.user;
+
+	async function handleSignOut() {
+		if (signingOut) return;
+		setSigningOut(true);
+
+		let destination = "/login";
+		try {
+			const response = await fetch("/api/auth/logout-url", {
+				cache: "no-store",
+			});
+			if (response.ok) {
+				const payload = (await response.json().catch(() => ({}))) as {
+					logoutUrl?: string;
+				};
+				destination = payload.logoutUrl || "/login";
+			}
+		} catch {
+			destination = "/login";
+		}
+
+		try {
+			await signOut({ redirect: false, callbackUrl: "/login" });
+		} finally {
+			window.location.href = destination;
+		}
+	}
 
 	const sidebarContent = (
 		<>
@@ -138,11 +176,16 @@ export function DashboardSidebar() {
 						variant="outline"
 						size="sm"
 						className="h-7 w-7 p-0"
-						onClick={() => signOut({ callbackUrl: "/login" })}
+						onClick={() => void handleSignOut()}
+						disabled={signingOut}
 						aria-label="Sign out"
 						title="Sign out"
 					>
-						<LogOut className="h-3.5 w-3.5" />
+						{signingOut ? (
+							<Loader2 className="h-3.5 w-3.5 animate-spin" />
+						) : (
+							<LogOut className="h-3.5 w-3.5" />
+						)}
 					</Button>
 				</div>
 			</div>

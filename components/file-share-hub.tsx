@@ -30,6 +30,8 @@ type SharedFile = {
 	uploaded_at: string;
 };
 
+const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+
 function formatUploadedAt(value: string) {
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return "-";
@@ -107,6 +109,11 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 			return;
 		}
 
+		if (selectedFile.size === 0 || selectedFile.size > MAX_UPLOAD_BYTES) {
+			setStatus("File must be between 1 byte and 1024MB.");
+			return;
+		}
+
 		setStatus("");
 		await uploadMutation.mutateAsync({
 			file: selectedFile,
@@ -162,6 +169,10 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 						<p className="text-xs text-muted-foreground">
 							Shared files:{" "}
 							<span className="font-medium text-foreground">{totalShared}</span>
+						</p>
+						<p className="text-xs text-muted-foreground">
+							Maximum file size:{" "}
+							<span className="font-medium text-foreground">1 GB</span>
 						</p>
 						{status ? (
 							<p className="text-xs text-muted-foreground">{status}</p>

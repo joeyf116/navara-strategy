@@ -88,6 +88,8 @@ type DialogState =
 	| { type: "rename"; entry: Entry }
 	| { type: "delete"; entry: Entry };
 
+const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+
 function formatSize(bytes: number) {
 	if (bytes === 0) return "-";
 	if (bytes < 1024) return `${bytes} B`;
@@ -747,9 +749,29 @@ export function FileManagerConsole() {
 							type="file"
 							ref={uploadInputRef}
 							onChange={(event) => {
-								setUploadFile(event.target.files?.[0] ?? null);
+								const selected = event.target.files?.[0] ?? null;
+								if (!selected) {
+									setUploadFile(null);
+									return;
+								}
+								if (selected.size === 0 || selected.size > MAX_UPLOAD_BYTES) {
+									setUploadFile(null);
+									setStatus({
+										message: "File must be between 1 byte and 1024MB.",
+										error: true,
+									});
+									if (uploadInputRef.current) {
+										uploadInputRef.current.value = "";
+									}
+									return;
+								}
+								setUploadFile(selected);
 							}}
 						/>
+						<p className="text-xs text-muted-foreground">
+							Maximum file size:{" "}
+							<span className="font-medium text-foreground">1 GB</span>
+						</p>
 					</div>
 					<DialogFooter>
 						<Button
@@ -764,7 +786,18 @@ export function FileManagerConsole() {
 						</Button>
 						<Button
 							onClick={() => {
-								if (uploadFile) void uploadMutation.mutateAsync(uploadFile);
+								if (!uploadFile) return;
+								if (
+									uploadFile.size === 0 ||
+									uploadFile.size > MAX_UPLOAD_BYTES
+								) {
+									setStatus({
+										message: "File must be between 1 byte and 1024MB.",
+										error: true,
+									});
+									return;
+								}
+								void uploadMutation.mutateAsync(uploadFile);
 							}}
 							disabled={!uploadFile || isDialogWorking}
 						>

@@ -866,7 +866,9 @@ resource "aws_iam_role_policy" "lambda_app" {
         Action = [
           "cognito-idp:ListUsers",
           "cognito-idp:AdminGetUser",
-          "cognito-idp:AdminListGroupsForUser"
+          "cognito-idp:AdminListGroupsForUser",
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminDeleteUser"
         ]
         Resource = aws_cognito_user_pool.this.arn
       }
@@ -903,9 +905,11 @@ resource "aws_lambda_function" "web" {
       NEXTAUTH_URL        = var.app_public_url
       AUTH_URL            = var.app_public_url
       AUTH_TRUST_HOST     = "true"
-      FILES_BUCKET        = aws_s3_bucket.transfer.bucket
-      FILES_BUCKET_PREFIX = var.files_bucket_prefix
-      SFTP_ENDPOINT       = aws_transfer_server.this.endpoint
+      FILES_BUCKET         = aws_s3_bucket.transfer.bucket
+      FILES_BUCKET_PREFIX  = var.files_bucket_prefix
+      SFTP_ENDPOINT        = aws_transfer_server.this.endpoint
+      EXCEL_IMPORT_PREFIX  = "excel-imports"
+      DATABASE_URL         = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.excel.address}:5432/${var.db_name}?sslmode=require"
     }
   }
 

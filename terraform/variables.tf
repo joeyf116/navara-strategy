@@ -152,3 +152,9 @@ variable "db_instance_class" {
   type        = string
   default     = "db.t3.micro"
 }
+
+variable "db_backup_retention_period" {
+  description = "RDS automated backup retention period in days (set to 0 for free-tier compatibility)"
+  type        = number
+  default     = 0
+}

@@ -11,8 +11,9 @@ resource "random_password" "db_password" {
 
 # Store the full connection string in Secrets Manager for operator reference.
 resource "aws_secretsmanager_secret" "db_url" {
-  name = "${var.project_name}/database-url"
-  tags = local.common_tags
+  name                    = "${var.project_name}/database-url"
+  recovery_window_in_days = 0
+  tags                    = local.common_tags
 }
 
 resource "aws_secretsmanager_secret_version" "db_url" {
@@ -79,7 +80,7 @@ resource "aws_db_instance" "excel" {
   skip_final_snapshot     = true
   storage_encrypted       = true
   deletion_protection     = false
-  backup_retention_period = 7
+  backup_retention_period = var.db_backup_retention_period
 
   tags = local.common_tags
 }

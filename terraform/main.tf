@@ -687,12 +687,12 @@ resource "aws_lambda_function" "sftp_auth" {
 
   environment {
     variables = {
-      COGNITO_USER_POOL_ID    = aws_cognito_user_pool.this.id
-      COGNITO_CLIENT_ID       = aws_cognito_user_pool_client.sftp_auth.id
-      TRANSFER_USER_ROLE_ARN  = aws_iam_role.transfer_user.arn
-      SUPER_ADMIN_ROLE_ARN    = aws_iam_role.transfer_super_admin.arn
-      S3_BUCKET               = aws_s3_bucket.transfer.bucket
-      FILES_BUCKET_PREFIX     = var.files_bucket_prefix
+      COGNITO_USER_POOL_ID   = aws_cognito_user_pool.this.id
+      COGNITO_CLIENT_ID      = aws_cognito_user_pool_client.sftp_auth.id
+      TRANSFER_USER_ROLE_ARN = aws_iam_role.transfer_user.arn
+      SUPER_ADMIN_ROLE_ARN   = aws_iam_role.transfer_super_admin.arn
+      S3_BUCKET              = aws_s3_bucket.transfer.bucket
+      FILES_BUCKET_PREFIX    = var.files_bucket_prefix
     }
   }
 
@@ -905,11 +905,11 @@ resource "aws_lambda_function" "web" {
       NEXTAUTH_URL        = var.app_public_url
       AUTH_URL            = var.app_public_url
       AUTH_TRUST_HOST     = "true"
-      FILES_BUCKET         = aws_s3_bucket.transfer.bucket
-      FILES_BUCKET_PREFIX  = var.files_bucket_prefix
-      SFTP_ENDPOINT        = aws_transfer_server.this.endpoint
-      EXCEL_IMPORT_PREFIX  = "excel-imports"
-      DATABASE_URL         = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.excel.address}:5432/${var.db_name}?sslmode=require"
+      FILES_BUCKET        = aws_s3_bucket.transfer.bucket
+      FILES_BUCKET_PREFIX = var.files_bucket_prefix
+      SFTP_ENDPOINT       = aws_transfer_server.this.endpoint
+      EXCEL_IMPORT_PREFIX = "excel-imports"
+      DATABASE_URL        = "postgresql://${var.db_username}:${random_password.db_password.result}@${aws_db_instance.excel.address}:5432/${var.db_name}?sslmode=require"
     }
   }
 
@@ -944,10 +944,10 @@ resource "aws_lambda_permission" "web_public" {
 }
 
 resource "aws_lambda_permission" "web_public_invoke" {
-  statement_id           = "AllowPublicInvokeViaFunctionUrl"
-  action                 = "lambda:InvokeFunction"
-  function_name          = aws_lambda_function.web.function_name
-  principal              = "*"
+  statement_id  = "AllowPublicInvokeViaFunctionUrl"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.web.function_name
+  principal     = "*"
 }
 
 # -----------------------------------------------------------------------------
@@ -1046,7 +1046,7 @@ resource "aws_cloudfront_distribution" "web" {
     cached_methods         = ["GET", "HEAD", "OPTIONS"]
     compress               = true
 
-    cache_policy_id          = aws_cloudfront_cache_policy.no_cache.id
+    cache_policy_id = aws_cloudfront_cache_policy.no_cache.id
     # Managed policy: AllViewerExceptHostHeader.
     origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   }

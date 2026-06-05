@@ -14,7 +14,7 @@ import {
 	FileSpreadsheet,
 	Settings,
 } from "lucide-react";
-import { useState } from "react";
+import { useSyncExternalStore, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -62,6 +62,11 @@ export function DashboardSidebar() {
 	const { data: session } = useSession();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [signingOut, setSigningOut] = useState(false);
+	const mounted = useSyncExternalStore(
+		() => () => {},
+		() => true,
+		() => false,
+	);
 
 	const user = session?.user;
 
@@ -151,9 +156,19 @@ export function DashboardSidebar() {
 						else setTheme("system");
 					}}
 				>
-					<Sun className="h-4 w-4 dark:hidden" />
-					<Moon className="h-4 w-4 hidden dark:block" />
-					{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}
+					{mounted ? (
+						<>
+							<Sun className="h-4 w-4 dark:hidden" aria-hidden />
+							<Moon className="h-4 w-4 hidden dark:block" aria-hidden />
+							{theme === "system"
+								? "System"
+								: theme === "dark"
+									? "Dark"
+									: "Light"}
+						</>
+					) : (
+						<span className="h-4 w-4" />
+					)}
 				</Button>
 				<div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2.5 py-1.5">
 					<Avatar className="h-7 w-7">

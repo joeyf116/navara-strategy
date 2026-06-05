@@ -4,8 +4,10 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus } from "lucide-react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
@@ -133,7 +135,6 @@ export function CreateCompanyDialog({
 				size="sm"
 				onClick={() => setOpen(true)}
 				disabled={disabled}
-				className="h-8 px-2.5"
 			>
 				<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
 				Create Company
@@ -157,8 +158,8 @@ export function CreateCompanyDialog({
 					</DialogHeader>
 
 					<div className="space-y-4">
-						<div className="space-y-1.5">
-							<Label htmlFor="company-name">Company Name</Label>
+						<div className="space-y-2">
+							<Label htmlFor="company-name">Company name</Label>
 							<Input
 								id="company-name"
 								name="companyName"
@@ -171,7 +172,7 @@ export function CreateCompanyDialog({
 
 						<div className="space-y-2">
 							<div className="flex items-center justify-between gap-2">
-								<Label htmlFor="grant-user-search">Grant User Access</Label>
+								<Label htmlFor="grant-user-search">Grant user access</Label>
 								<Badge variant="outline">{selectedUsers.length} selected</Badge>
 							</div>
 							<Input
@@ -184,11 +185,11 @@ export function CreateCompanyDialog({
 							/>
 							<div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
 								{usersLoading ? (
-									<p className="text-xs text-muted-foreground">
+									<p className="px-2 py-1 text-sm text-muted-foreground">
 										Loading users...
 									</p>
 								) : filteredUsers.length === 0 ? (
-									<p className="text-xs text-muted-foreground">
+									<p className="px-2 py-1 text-sm text-muted-foreground">
 										No matching users.
 									</p>
 								) : (
@@ -197,7 +198,7 @@ export function CreateCompanyDialog({
 										return (
 											<label
 												key={user.username}
-												className="flex cursor-pointer items-center justify-between rounded px-2 py-1 hover:bg-accent"
+												className="flex cursor-pointer items-center justify-between rounded px-2 py-1.5 hover:bg-accent"
 											>
 												<div className="min-w-0">
 													<p className="truncate text-sm font-medium">
@@ -207,11 +208,10 @@ export function CreateCompanyDialog({
 														{user.username}
 													</p>
 												</div>
-												<input
-													type="checkbox"
-													className="h-4 w-4"
+												<Checkbox
 													checked={checked}
-													onChange={() => toggleUser(user.email)}
+													onCheckedChange={() => toggleUser(user.email)}
+													aria-label={`Grant access to ${user.email}`}
 												/>
 											</label>
 										);
@@ -221,7 +221,9 @@ export function CreateCompanyDialog({
 						</div>
 
 						{errorMessage ? (
-							<p className="text-xs text-destructive">{errorMessage}</p>
+							<Alert variant="destructive">
+								<AlertDescription>{errorMessage}</AlertDescription>
+							</Alert>
 						) : null}
 					</div>
 
@@ -238,10 +240,9 @@ export function CreateCompanyDialog({
 							disabled={!companyName.trim() || createCompanyMutation.isPending}
 						>
 							{createCompanyMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							) : (
-								"Create Company"
-							)}
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Create Company
 						</Button>
 					</DialogFooter>
 				</DialogContent>

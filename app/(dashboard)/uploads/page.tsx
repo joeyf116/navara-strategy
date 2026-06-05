@@ -5,12 +5,15 @@ import { useQuery } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	Clock,
+	Copy,
 	FileSpreadsheet,
 	Loader2,
 	UploadCloud,
 	XCircle,
 } from "lucide-react";
 
+import { PageHeader } from "@/components/common/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -220,25 +223,21 @@ export default function ExcelImportPage() {
 	}, [connectionInfo?.database?.connectionString]);
 
 	return (
-		<div className="space-y-4">
-			<div className="space-y-1">
-				<h1 className="text-xl font-semibold">Excel Import</h1>
-				<p className="text-xs text-muted-foreground">
-					Upload an Excel file to import its rows into the PostgreSQL database.
-				</p>
-			</div>
+		<div className="space-y-6">
+			<PageHeader
+				title="Excel Import"
+				description="Upload an Excel file to import its rows into the PostgreSQL database."
+			/>
 
 			{connectionInfo?.isSuperAdmin && connectionInfo.database ? (
 				<Card>
 					<CardHeader>
-						<CardTitle className="text-sm">
-							Database Connection String
-						</CardTitle>
+						<CardTitle className="text-sm">Database Connection String</CardTitle>
 						<CardDescription>
 							Use this with psql or your SQL client.
 						</CardDescription>
 					</CardHeader>
-					<CardContent className="space-y-2">
+					<CardContent className="space-y-3">
 						<p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
 							{connectionInfo.database.connectionString}
 						</p>
@@ -246,10 +245,9 @@ export default function ExcelImportPage() {
 							<Button
 								variant="outline"
 								size="sm"
-								onClick={() => {
-									void handleCopyConnectionString();
-								}}
+								onClick={() => void handleCopyConnectionString()}
 							>
+								<Copy className="mr-2 h-4 w-4" />
 								Copy connection string
 							</Button>
 							{copyStatus === "copied" ? (
@@ -270,9 +268,12 @@ export default function ExcelImportPage() {
 						<div className="text-center">
 							<p className="text-lg font-semibold">Import complete</p>
 							{jobData?.job?.rowCount != null && (
-								<p className="text-sm text-muted-foreground">
+								<p className="mt-1 text-sm text-muted-foreground">
 									{jobData.job.rowCount.toLocaleString()} rows imported from{" "}
-									<span className="font-medium">{selectedFile?.name}</span>.
+									<span className="font-medium text-foreground">
+										{selectedFile?.name}
+									</span>
+									.
 								</p>
 							)}
 						</div>
@@ -282,20 +283,16 @@ export default function ExcelImportPage() {
 			)}
 
 			{currentPhase === "error" && (
-				<Card>
-					<CardContent className="flex flex-col items-center gap-4 py-14">
-						<XCircle className="h-16 w-16 text-destructive" />
-						<div className="text-center">
-							<p className="text-lg font-semibold">Import failed</p>
-							<p className="mt-1 max-w-md text-sm text-destructive">
-								{currentErrorMessage}
-							</p>
-						</div>
-						<Button variant="outline" onClick={reset}>
-							Try again
-						</Button>
-					</CardContent>
-				</Card>
+				<div className="space-y-4">
+					<Alert variant="destructive">
+						<XCircle className="h-4 w-4" />
+						<AlertTitle>Import failed</AlertTitle>
+						<AlertDescription>{currentErrorMessage}</AlertDescription>
+					</Alert>
+					<Button variant="outline" onClick={reset}>
+						Try again
+					</Button>
+				</div>
 			)}
 
 			{currentPhase === "processing" && (
@@ -309,7 +306,7 @@ export default function ExcelImportPage() {
 								several minutes.
 							</p>
 							{selectedFile && (
-								<p className="text-xs text-muted-foreground">
+								<p className="text-sm text-muted-foreground">
 									{selectedFile.name} ({formatBytes(selectedFile.size)})
 								</p>
 							)}
@@ -333,9 +330,7 @@ export default function ExcelImportPage() {
 						<div className="w-full max-w-sm space-y-3 text-center">
 							<p className="font-semibold">
 								Uploading{" "}
-								<span className="text-muted-foreground">
-									{selectedFile?.name}
-								</span>
+								<span className="text-muted-foreground">{selectedFile?.name}</span>
 							</p>
 							<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
 								<div
@@ -353,56 +348,48 @@ export default function ExcelImportPage() {
 				<Card>
 					<CardContent className="flex flex-col items-center gap-4 py-14">
 						<Loader2 className="h-16 w-16 animate-spin text-primary" />
-						<p className="text-muted-foreground">Preparing upload…</p>
+						<p className="text-sm text-muted-foreground">Preparing upload…</p>
 					</CardContent>
 				</Card>
 			)}
 
 			{currentPhase === "idle" && (
-				<>
-					<Card>
-						<CardContent className="p-6">
-							<div
-								className={`flex flex-col items-center gap-6 rounded-2xl border-2 border-dashed px-6 py-16 transition-colors ${
-									dragOver
-										? "border-primary bg-primary/5"
-										: "border-border hover:border-primary/40 hover:bg-muted/20"
-								}`}
-								onDragOver={(e) => {
-									e.preventDefault();
-									setDragOver(true);
-								}}
-								onDragLeave={() => setDragOver(false)}
-								onDrop={handleDrop}
-							>
-								<FileSpreadsheet className="h-16 w-16 text-muted-foreground" />
-								<div className="space-y-1 text-center">
-									<p className="text-lg font-semibold">
-										Drop your Excel file here
-									</p>
-									<p className="text-sm text-muted-foreground">
-										Supports{" "}
-										<span className="font-medium text-foreground">.xlsx</span>{" "}
-										and{" "}
-										<span className="font-medium text-foreground">.xls</span> —
-										up to{" "}
-										<span className="font-medium text-foreground">1 GB</span>
-									</p>
-								</div>
-								<input
-									ref={fileInputRef}
-									type="file"
-									accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
-									className="sr-only"
-									onChange={handleFileChange}
-								/>
-								<Button onClick={() => fileInputRef.current?.click()}>
-									<UploadCloud className="h-4 w-4" />
-									Select file
-								</Button>
-							</div>
-						</CardContent>
-					</Card>
+				<div className="space-y-4">
+					<div
+						className={`flex flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-16 transition-colors ${
+							dragOver
+								? "border-primary bg-primary/5"
+								: "border-border hover:border-primary/40 hover:bg-muted/20"
+						}`}
+						onDragOver={(e) => {
+							e.preventDefault();
+							setDragOver(true);
+						}}
+						onDragLeave={() => setDragOver(false)}
+						onDrop={handleDrop}
+					>
+						<FileSpreadsheet className="h-16 w-16 text-muted-foreground" />
+						<div className="space-y-1 text-center">
+							<p className="text-lg font-semibold">Drop your Excel file here</p>
+							<p className="text-sm text-muted-foreground">
+								Supports{" "}
+								<span className="font-medium text-foreground">.xlsx</span> and{" "}
+								<span className="font-medium text-foreground">.xls</span> — up to{" "}
+								<span className="font-medium text-foreground">1 GB</span>
+							</p>
+						</div>
+						<input
+							ref={fileInputRef}
+							type="file"
+							accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+							className="sr-only"
+							onChange={handleFileChange}
+						/>
+						<Button onClick={() => fileInputRef.current?.click()}>
+							<UploadCloud className="mr-2 h-4 w-4" />
+							Select file
+						</Button>
+					</div>
 
 					<Card>
 						<CardHeader>
@@ -413,9 +400,7 @@ export default function ExcelImportPage() {
 						</CardHeader>
 						<CardContent className="text-sm text-muted-foreground">
 							<ol className="list-inside list-decimal space-y-1">
-								<li>
-									Select or drop an Excel file (.xlsx or .xls, up to 1 GB).
-								</li>
+								<li>Select or drop an Excel file (.xlsx or .xls, up to 1 GB).</li>
 								<li>
 									The file uploads directly to S3 via a presigned URL — no web
 									server payload limit applies.
@@ -431,7 +416,7 @@ export default function ExcelImportPage() {
 							</ol>
 						</CardContent>
 					</Card>
-				</>
+				</div>
 			)}
 		</div>
 	);

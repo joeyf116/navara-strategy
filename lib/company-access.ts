@@ -47,6 +47,107 @@ const filesBucketPrefix = (
 const s3Client = filesBucket ? new S3Client({}) : null;
 const cognitoClient = new CognitoIdentityProviderClient({});
 
+const isDevMode =
+	process.env.NODE_ENV !== "production" ||
+	process.env.NEXT_PUBLIC_DEV_MODE === "true";
+
+// Dev mode mock data — used when isDevMode && !filesBucket (no AWS configured locally)
+const DEV_MOCK_COMPANIES = [
+	"acme-corp",
+	"globex",
+	"initech",
+	"umbrella-corp",
+	"wayne-enterprises",
+	"stark-industries",
+	"cyberdyne-systems",
+	"weyland-yutani",
+	"oscorp-industries",
+	"soylent-corp",
+	"tyrell-corp",
+	"blue-sun",
+	"massive-dynamic",
+	"dharma-initiative",
+	"monarch-sciences",
+	"veridian-dynamics",
+	"dunder-mifflin",
+	"prestige-worldwide",
+	"pied-piper",
+	"hooli-tech",
+	"vought-international",
+	"nakatomi-corp",
+	"primatech-paper",
+	"virtucon",
+	"buy-n-large",
+];
+
+const DEV_MOCK_USERS: CognitoUserSummary[] = [
+	{
+		username: "superadmin@navara.io",
+		email: "superadmin@navara.io",
+		name: "Super Admin",
+		enabled: true,
+		status: "CONFIRMED",
+		createdAt: "2024-01-01T00:00:00.000Z",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+	},
+	{
+		username: "admin@navara.io",
+		email: "admin@navara.io",
+		name: "Admin User",
+		enabled: true,
+		status: "CONFIRMED",
+		createdAt: "2024-01-01T00:00:00.000Z",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+	},
+	{
+		username: "tenant@acme.com",
+		email: "tenant@acme.com",
+		name: "Tenant User",
+		enabled: true,
+		status: "CONFIRMED",
+		createdAt: "2024-01-01T00:00:00.000Z",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+	},
+	{
+		username: "auditor@navara.io",
+		email: "auditor@navara.io",
+		name: "Auditor",
+		enabled: false,
+		status: "CONFIRMED",
+		createdAt: "2024-01-01T00:00:00.000Z",
+		updatedAt: "2024-01-01T00:00:00.000Z",
+	},
+];
+
+function getDevMockAccess(emailRaw: string): UserCompanyAccess {
+	const email = normalizeEmail(emailRaw);
+	switch (email) {
+		case "superadmin@navara.io":
+			return {
+				isSuperAdmin: true,
+				grants: DEV_MOCK_COMPANIES.map((companyId) => ({
+					companyId,
+					canWrite: true,
+				})),
+			};
+		case "admin@navara.io":
+			return {
+				isSuperAdmin: false,
+				grants: [
+					{ companyId: "acme-corp", canWrite: true },
+					{ companyId: "globex", canWrite: false },
+				],
+			};
+		case "tenant@acme.com":
+			return {
+				isSuperAdmin: false,
+				grants: [{ companyId: "acme-corp", canWrite: true }],
+			};
+		default:
+			return { isSuperAdmin: false, grants: [] };
+	}
+}
+
 const COMPANY_SUBDIRS = ["to_navara", "from_navara"];
 
 function normalizeEmail(email: string): string {
@@ -369,6 +470,7 @@ async function listCompaniesFromS3(): Promise<string[]> {
 }
 
 export async function listAllCompanies(): Promise<string[]> {
+	if (isDevMode && !filesBucket) return DEV_MOCK_COMPANIES;
 	const [indexed, fromS3] = await Promise.all([
 		readCompanyIndex(),
 		listCompaniesFromS3(),
@@ -466,6 +568,7 @@ export async function setBulkUserCompanyAccess(
 export async function resolveUserCompanyAccess(
 	userEmailRaw: string,
 ): Promise<UserCompanyAccess> {
+	if (isDevMode && !filesBucket) return getDevMockAccess(userEmailRaw);
 	const userEmail = normalizeEmail(userEmailRaw);
 
 	const [stored, cognito] = await Promise.all([
@@ -495,6 +598,7 @@ export async function resolveUserCompanyAccess(
 export async function getUserCompanyAccessForAdmin(
 	userEmailRaw: string,
 ): Promise<UserCompanyAccess> {
+	if (isDevMode && !filesBucket) return getDevMockAccess(userEmailRaw);
 	const userEmail = normalizeEmail(userEmailRaw);
 	const [stored, cognito] = await Promise.all([
 		readStoredAccess(userEmail),
@@ -515,6 +619,18 @@ export async function createCognitoUser({
 	name,
 	temporaryPassword,
 }: CreateCognitoUserInput): Promise<CognitoUserSummary> {
+	if (isDevMode && !filesBucket) {
+		const email = normalizeEmail(emailRaw);
+		return {
+			username: email,
+			email,
+			name: name?.trim() || null,
+			enabled: true,
+			status: "FORCE_CHANGE_PASSWORD",
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+	}
 	const poolId = getPoolIdFromIssuer();
 	if (!poolId) {
 		throw new Error("Cognito user pool is not configured.");
@@ -565,6 +681,9 @@ export async function createCognitoUser({
 export async function deleteCognitoUser(
 	userEmailRaw: string,
 ): Promise<{ userEmail: string }> {
+	if (isDevMode && !filesBucket) {
+		return { userEmail: normalizeEmail(userEmailRaw) };
+	}
 	const poolId = getPoolIdFromIssuer();
 	if (!poolId) {
 		throw new Error("Cognito user pool is not configured.");
@@ -599,6 +718,7 @@ function parseCognitoDate(value: Date | undefined): string | null {
 }
 
 export async function listCognitoUsers(): Promise<CognitoUserSummary[]> {
+	if (isDevMode && !filesBucket) return DEV_MOCK_USERS;
 	const poolId = getPoolIdFromIssuer();
 	if (!poolId) return [];
 

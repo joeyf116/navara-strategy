@@ -1,6 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/theme";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Geist } from "next/font/google";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
 	title: "Navara Insights Portal",
@@ -19,9 +25,14 @@ export default function RootLayout({
 	children: React.ReactNode;
 }>) {
 	return (
-		<html lang="en" className="h-full antialiased" suppressHydrationWarning>
+		<html lang="en" className={cn("h-full antialiased", "font-sans", geist.variable)} suppressHydrationWarning>
 			<body className="min-h-full bg-background text-foreground">
-				<ThemeProvider>{children}</ThemeProvider>
+				<ThemeProvider>
+					<TooltipProvider>
+						{children}
+						<Toaster />
+					</TooltipProvider>
+				</ThemeProvider>
 			</body>
 		</html>
 	);

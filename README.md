@@ -1,6 +1,6 @@
 # navara-strategy
 
-Secure file sharing portal built with Next.js, deployed to AWS Lambda (container image) behind CloudFront. **All application state is stored in S3** — there is no database.
+Secure multi-tenant file sharing portal and data ingestion platform built with Next.js, deployed to AWS Lambda (container image) behind CloudFront. **Primary application state is stored in S3.** Excel file ingestion is persisted to a PostgreSQL (RDS) database.
 
 ## Architecture
 
@@ -13,6 +13,7 @@ flowchart LR
     APP --> COG[Cognito via NextAuth]
     APP --> S3[(S3 Bucket)]
     APP --> TF[AWS Transfer Family SFTP]
+    APP --> RDS[(PostgreSQL RDS)]
 
     subgraph S3 Layout
       S3 --> UF[uploads/user-files/{email}/...]
@@ -20,6 +21,7 @@ flowchart LR
       S3 --> SH[uploads/.metadata/shares/{email}.json]
       S3 --> LK[uploads/.metadata/locks/{token}.json]
       S3 --> IX[uploads/.metadata/shared-files-index.json]
+      S3 --> EX[excel-imports/{jobId}/{filename}]
     end
 ```
 
@@ -27,26 +29,41 @@ Production URL: <https://d2i0sz4mcgor37.cloudfront.net>
 
 ### Storage Model
 
-All mutable state lives in a single S3 bucket. No database is required.
+Primary mutable state lives in a single S3 bucket. A PostgreSQL RDS instance stores parsed Excel ingestion data and job tracking.
 
-| S3 key pattern                                  | Content                                              |
-| ----------------------------------------------- | ---------------------------------------------------- |
-| `{prefix}/user-files/{email}/path/to/file`      | User file content                                    |
-| `{prefix}/user-files/{email}/folder/`           | Folder marker (zero-byte, `application/x-directory`) |
-| `{prefix}/.metadata/app-passwords/{email}.json` | App password records for WebDAV Basic Auth           |
-| `{prefix}/.metadata/shares/{email}.json`        | Share grants for a grantee                           |
-| `{prefix}/.metadata/locks/{token}.json`         | Active WebDAV lock                                   |
-| `{prefix}/.metadata/shared-files-index.json`    | Admin shared-files index                             |
+| S3 key pattern                                         | Content                                              |
+| ------------------------------------------------------ | ---------------------------------------------------- |
+| `{prefix}/user-files/{email}/path/to/file`             | User file content                                    |
+| `{prefix}/user-files/{email}/folder/`                  | Folder marker (zero-byte, `application/x-directory`) |
+| `{prefix}/.metadata/app-passwords/{email}.json`        | App password records for WebDAV Basic Auth           |
+| `{prefix}/.metadata/shares/{email}.json`               | Share grants for a grantee                           |
+| `{prefix}/.metadata/locks/{token}.json`                | Active WebDAV lock                                   |
+| `{prefix}/.metadata/shared-files-index.json`           | Admin shared-files index                             |
+| `{prefix}/.metadata/company-access/{email}.json`       | Per-user multi-company access grants                 |
+| `excel-imports/{jobId}/{filename}`                      | Uploaded Excel files staged for Lambda parsing       |
 
 `{prefix}` is controlled by the `FILES_BUCKET_PREFIX` environment variable (default: `uploads`).
 
 In local development (no `FILES_BUCKET` env var), each of these falls back to a parallel path under `uploads/` on the local filesystem.
 
+### PostgreSQL Database
+
+A PostgreSQL 16 RDS instance (managed by Terraform in `terraform/rds.tf`) stores:
+
+- **Excel ingestion jobs** — job ID, status (`pending` → `processing` → `completed` / `failed`), filename, created-by email, timestamps.
+- **Parsed sheet data** — row data extracted from `.xlsx`/`.xls` files by the `excel-parser` Lambda.
+
+The schema is auto-created on first use via `lib/excel-upload.ts` (`ensureSchema()`). No manual migrations are needed.
+
 ### Runtime Components
 
-- UI routes: [app](app). Authenticated dashboard at [app/(dashboard)](<app/(dashboard)>); unauthenticated share hub at [app/upload](app/upload).
-- Auth: NextAuth backed by Cognito in production; dev credentials used locally. Config: [lib/auth.ts](lib/auth.ts).
-- File APIs: REST endpoints under `app/api/files/` (shared files + virtual tree), WebDAV at `app/api/dav/`, and settings at `app/api/settings/`. See [Project Paths](#project-paths) for the full breakdown.
+- **UI routes**: [app](app). Authenticated dashboard at [app/(dashboard)](<app/(dashboard)>); unauthenticated share hub at [app/upload](app/upload).
+- **Auth**: NextAuth v5 backed by Cognito in production; dev credentials used locally. Config: [lib/auth.ts](lib/auth.ts).
+- **File APIs**: REST endpoints under `app/api/files/` (shared files + virtual tree), WebDAV at `app/api/dav/`, and settings at `app/api/settings/`.
+- **Excel ingestion**: Upload `.xlsx`/`.xls` files via `app/api/excel-upload/presign` (returns a presigned S3 URL + job ID), then poll `app/api/excel-upload/status/[jobId]` for processing status. The `excel-parser` Lambda reads from S3 and writes rows to PostgreSQL.
+- **Data quality**: [lib/anomaly-detection.ts](lib/anomaly-detection.ts), [lib/reconciliation.ts](lib/reconciliation.ts), and [lib/ingestion-validation.ts](lib/ingestion-validation.ts) provide server-side anomaly detection, reconciliation, and validation rules for ingested data.
+
+See [Project Paths](#project-paths) for the full file breakdown.
 
 ### RBAC Model
 
@@ -737,38 +754,47 @@ Cyberduck doesn't mount as a native volume but provides full file management:
 
 ## Project Paths
 
-| Path                                                                                   | Purpose                                              |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| [app](app)                                                                             | All Next.js routes                                   |
-| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)                     | Dashboard — virtual file tree UI                     |
-| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)                 | Dashboard — shared-file upload / inbox UI            |
-| [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>)               | Settings — app passwords + connection info           |
-| [app/upload/page.tsx](app/upload/page.tsx)                                             | Standalone file-share hub (outside dashboard layout) |
-| [app/login/page.tsx](app/login/page.tsx)                                               | Login page                                           |
-| [app/api/files/route.ts](app/api/files/route.ts)                                       | List / upload shared files                           |
-| [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)           | Download a shared file by ID                         |
-| [app/api/files/tree/route.ts](app/api/files/tree/route.ts)                             | Virtual file tree (CRUD + sharing)                   |
-| [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts) | Download a virtual-tree file by ID                   |
-| [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)                       | WebDAV endpoint                                      |
-| [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)     | App password CRUD                                    |
-| [app/api/settings/connection-info/route.ts](app/api/settings/connection-info/route.ts) | SFTP + WebDAV connection details                     |
-| [components/file-share-hub.tsx](components/file-share-hub.tsx)                         | Shared-files upload / download UI                    |
-| [components/file-manager-console.tsx](components/file-manager-console.tsx)             | Virtual file tree UI                                 |
-| [components/dashboard-sidebar.tsx](components/dashboard-sidebar.tsx)                   | Navigation sidebar                                   |
-| [lib/auth.ts](lib/auth.ts)                                                             | NextAuth + Cognito config                            |
-| [lib/files.ts](lib/files.ts)                                                           | Shared-file CRUD (S3-backed index)                   |
-| [lib/virtual-files.ts](lib/virtual-files.ts)                                           | Virtual file system (S3-native)                      |
-| [lib/app-passwords.ts](lib/app-passwords.ts)                                           | App password management (S3-backed)                  |
-| [lib/webdav-locks.ts](lib/webdav-locks.ts)                                             | WebDAV distributed locks (S3-backed)                 |
-| [lib/query-provider.tsx](lib/query-provider.tsx)                                       | TanStack Query client provider                       |
-| [lib/mock-data.ts](lib/mock-data.ts)                                                   | Mock data for local development                      |
-| [lib/observability.ts](lib/observability.ts)                                           | Metrics + tracing abstractions                       |
-| [lib/anomaly-detection.ts](lib/anomaly-detection.ts)                                   | Anomaly detection engine                             |
-| [lib/reconciliation.ts](lib/reconciliation.ts)                                         | Data reconciliation engine                           |
-| [lib/ingestion-validation.ts](lib/ingestion-validation.ts)                             | Ingestion validation rules engine                    |
-| [Dockerfile.lambda](Dockerfile.lambda)                                                 | Lambda container image                               |
-| [terraform/main.tf](terraform/main.tf)                                                 | All AWS infrastructure                               |
-| [terraform/sftp-auth/index.mjs](terraform/sftp-auth/index.mjs)                         | SFTP custom auth Lambda (Node.js)                    |
-| [terraform/post-confirmation/index.py](terraform/post-confirmation/index.py)           | S3 folder auto-provisioner Lambda (Python)           |
-| [.github/workflows/deploy.yml](.github/workflows/deploy.yml)                           | Full CI/CD deploy pipeline                           |
-| [.github/workflows/ci.yml](.github/workflows/ci.yml)                                   | PR-only CI gate                                      |
+| Path                                                                                         | Purpose                                              |
+| -------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| [app](app)                                                                                   | All Next.js routes                                   |
+| [app/(dashboard)/files/page.tsx](<app/(dashboard)/files/page.tsx>)                           | Dashboard — virtual file tree UI                     |
+| [app/(dashboard)/uploads/page.tsx](<app/(dashboard)/uploads/page.tsx>)                       | Dashboard — shared-file upload / inbox UI            |
+| [app/(dashboard)/settings/page.tsx](<app/(dashboard)/settings/page.tsx>)                     | Settings — app passwords, connection info, company access |
+| [app/upload/page.tsx](app/upload/page.tsx)                                                   | Standalone file-share hub (outside dashboard layout) |
+| [app/login/page.tsx](app/login/page.tsx)                                                     | Login page                                           |
+| [app/api/files/route.ts](app/api/files/route.ts)                                             | List / upload shared files                           |
+| [app/api/files/[id]/download/route.ts](app/api/files/[id]/download/route.ts)                 | Download a shared file by ID                         |
+| [app/api/files/tree/route.ts](app/api/files/tree/route.ts)                                   | Virtual file tree (CRUD + sharing)                   |
+| [app/api/files/tree/download/[id]/route.ts](app/api/files/tree/download/[id]/route.ts)       | Download a virtual-tree file by ID                   |
+| [app/api/dav/[...path]/route.ts](app/api/dav/[...path]/route.ts)                             | WebDAV endpoint                                      |
+| [app/api/settings/app-passwords/route.ts](app/api/settings/app-passwords/route.ts)           | App password CRUD                                    |
+| [app/api/settings/connection-info/route.ts](app/api/settings/connection-info/route.ts)       | SFTP + WebDAV connection details                     |
+| [app/api/settings/company-access/route.ts](app/api/settings/company-access/route.ts)         | Company access grants — create company, set/list user access |
+| [app/api/settings/company-access/users/route.ts](app/api/settings/company-access/users/route.ts) | List all users for company access management     |
+| [app/api/settings/database/verify/route.ts](app/api/settings/database/verify/route.ts)       | Super-admin: verify PostgreSQL connectivity          |
+| [app/api/excel-upload/presign/route.ts](app/api/excel-upload/presign/route.ts)               | Create Excel upload job + return presigned S3 URL    |
+| [app/api/excel-upload/status/[jobId]/route.ts](app/api/excel-upload/status/[jobId]/route.ts) | Poll Excel ingestion job status                      |
+| [components/file-share-hub.tsx](components/file-share-hub.tsx)                               | Shared-files upload / download UI                    |
+| [components/file-manager-console.tsx](components/file-manager-console.tsx)                   | Virtual file tree UI                                 |
+| [components/dashboard-sidebar.tsx](components/dashboard-sidebar.tsx)                         | Navigation sidebar                                   |
+| [lib/auth.ts](lib/auth.ts)                                                                   | NextAuth + Cognito config                            |
+| [lib/files.ts](lib/files.ts)                                                                 | Shared-file CRUD (S3-backed index)                   |
+| [lib/virtual-files.ts](lib/virtual-files.ts)                                                 | Virtual file system (S3-native)                      |
+| [lib/company-access.ts](lib/company-access.ts)                                               | Multi-company access grants (S3-backed)              |
+| [lib/app-passwords.ts](lib/app-passwords.ts)                                                 | App password management (S3-backed)                  |
+| [lib/webdav-locks.ts](lib/webdav-locks.ts)                                                   | WebDAV distributed locks (S3-backed)                 |
+| [lib/excel-upload.ts](lib/excel-upload.ts)                                                   | Excel ingestion job management (PostgreSQL-backed)   |
+| [lib/anomaly-detection.ts](lib/anomaly-detection.ts)                                         | Data quality anomaly detection engine                |
+| [lib/reconciliation.ts](lib/reconciliation.ts)                                               | Data reconciliation engine                           |
+| [lib/ingestion-validation.ts](lib/ingestion-validation.ts)                                   | Ingestion validation rules engine                    |
+| [lib/query-provider.tsx](lib/query-provider.tsx)                                             | TanStack Query client provider                       |
+| [lib/mock-data.ts](lib/mock-data.ts)                                                         | Mock data for local development                      |
+| [lib/observability.ts](lib/observability.ts)                                                 | Metrics + tracing abstractions                       |
+| [Dockerfile.lambda](Dockerfile.lambda)                                                       | Lambda container image                               |
+| [terraform/main.tf](terraform/main.tf)                                                       | AWS infrastructure (Lambda, Cognito, CloudFront, S3, Transfer, IAM) |
+| [terraform/rds.tf](terraform/rds.tf)                                                         | PostgreSQL 16 RDS configuration                      |
+| [terraform/sftp-auth/index.mjs](terraform/sftp-auth/index.mjs)                               | SFTP custom auth Lambda (Node.js)                    |
+| [terraform/post-confirmation/index.py](terraform/post-confirmation/index.py)                 | S3 folder auto-provisioner Lambda (Python)           |
+| [terraform/excel-parser/index.mjs](terraform/excel-parser/index.mjs)                         | Excel file parsing Lambda (Node.js → PostgreSQL)     |
+| [.github/workflows/deploy.yml](.github/workflows/deploy.yml)                                 | Full CI/CD deploy pipeline                           |
+| [.github/workflows/ci.yml](.github/workflows/ci.yml)                                         | PR-only CI gate                                      |

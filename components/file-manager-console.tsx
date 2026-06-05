@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ColumnDef,
@@ -21,7 +21,7 @@ import {
 
 import { CreateCompanyDialog } from "@/components/create-company-dialog";
 import { PageHeader } from "@/components/common/page-header";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from "sonner";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -153,10 +153,6 @@ export function FileManagerConsole() {
 	"use no memo";
 	const queryClient = useQueryClient();
 	const [currentPath, setCurrentPath] = useState<string[]>([]);
-	const [status, setStatus] = useState<{
-		message: string;
-		error?: boolean;
-	} | null>(null);
 	const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 	const [dialog, setDialog] = useState<DialogState>({ type: "closed" });
 	const [folderName, setFolderName] = useState("");
@@ -192,6 +188,16 @@ export function FileManagerConsole() {
 			return payload.entries ?? [];
 		},
 	});
+
+	useEffect(() => {
+		if (loadError) {
+			toast.error(
+				loadError instanceof Error
+					? loadError.message
+					: "Failed to load files.",
+			);
+		}
+	}, [loadError]);
 
 	const { data: connection = null } = useQuery<ConnectionInfo>({
 		queryKey: ["connection-info"],
@@ -232,7 +238,7 @@ export function FileManagerConsole() {
 			}
 		},
 		onSuccess: async (_, name) => {
-			setStatus({ message: `Created folder ${name} in ${destinationLabel}` });
+			toast.success(`Created folder "${name}" in ${destinationLabel}`);
 			setFolderName("");
 			setDialog({ type: "closed" });
 			await queryClient.invalidateQueries({
@@ -240,11 +246,9 @@ export function FileManagerConsole() {
 			});
 		},
 		onError: (error) => {
-			setStatus({
-				message:
-					error instanceof Error ? error.message : "Failed to create folder.",
-				error: true,
-			});
+			toast.error(
+				error instanceof Error ? error.message : "Failed to create folder.",
+			);
 		},
 	});
 
@@ -276,7 +280,7 @@ export function FileManagerConsole() {
 			});
 		},
 		onSuccess: async () => {
-			setStatus({ message: `Uploaded file to ${destinationLabel}` });
+			toast.success(`Uploaded file to ${destinationLabel}`);
 			setUploadFile(null);
 			setDialog({ type: "closed" });
 			await queryClient.invalidateQueries({
@@ -284,10 +288,7 @@ export function FileManagerConsole() {
 			});
 		},
 		onError: (error) => {
-			setStatus({
-				message: error instanceof Error ? error.message : "Upload failed.",
-				error: true,
-			});
+			toast.error(error instanceof Error ? error.message : "Upload failed.");
 		},
 		onSettled: () => {
 			setUploadProgress(null);
@@ -305,17 +306,14 @@ export function FileManagerConsole() {
 			if (!response.ok) throw new Error(body.error ?? "Rename failed.");
 		},
 		onSuccess: async () => {
-			setStatus({ message: "Item renamed." });
+			toast.success("Item renamed.");
 			setDialog({ type: "closed" });
 			await queryClient.invalidateQueries({
 				queryKey: ["files-tree", currentPathString],
 			});
 		},
 		onError: (error) => {
-			setStatus({
-				message: error instanceof Error ? error.message : "Rename failed.",
-				error: true,
-			});
+			toast.error(error instanceof Error ? error.message : "Rename failed.");
 		},
 	});
 
@@ -329,31 +327,16 @@ export function FileManagerConsole() {
 			if (!response.ok) throw new Error(body.error ?? "Delete failed.");
 		},
 		onSuccess: async () => {
-			setStatus({ message: "Item deleted." });
+			toast.success("Item deleted.");
 			setDialog({ type: "closed" });
 			await queryClient.invalidateQueries({
 				queryKey: ["files-tree", currentPathString],
 			});
 		},
 		onError: (error) => {
-			setStatus({
-				message: error instanceof Error ? error.message : "Delete failed.",
-				error: true,
-			});
+			toast.error(error instanceof Error ? error.message : "Delete failed.");
 		},
 	});
-
-	const activeStatus =
-		status ??
-		(loadError
-			? {
-					message:
-						loadError instanceof Error
-							? loadError.message
-							: "Failed to load files.",
-					error: true,
-				}
-			: null);
 
 	const isDialogWorking =
 		createFolderMutation.isPending ||
@@ -397,7 +380,6 @@ export function FileManagerConsole() {
 	}, [entries, currentPath.length]);
 
 	function navigateToPath(path: string[]) {
-		setStatus(null);
 		setCurrentPath(path);
 	}
 
@@ -542,7 +524,7 @@ export function FileManagerConsole() {
 					actions={
 						connection?.isSuperAdmin ? (
 							<CreateCompanyDialog
-								onCreated={(message) => setStatus({ message })}
+								onCreated={(message) => toast.success(message)}
 								disabled={isFetching}
 							/>
 						) : undefined
@@ -620,12 +602,6 @@ export function FileManagerConsole() {
 								/>
 							</div>
 						</div>
-					) : null}
-
-					{activeStatus ? (
-						<Alert variant={activeStatus.error ? "destructive" : "default"}>
-							<AlertDescription>{activeStatus.message}</AlertDescription>
-						</Alert>
 					) : null}
 				</div>
 
@@ -774,10 +750,7 @@ export function FileManagerConsole() {
 								}
 								if (selected.size === 0 || selected.size > MAX_UPLOAD_BYTES) {
 									setUploadFile(null);
-									setStatus({
-										message: "File must be between 1 byte and 1024 MB.",
-										error: true,
-									});
+									toast.error("File must be between 1 byte and 1024 MB.");
 									if (uploadInputRef.current) {
 										uploadInputRef.current.value = "";
 									}
@@ -809,10 +782,7 @@ export function FileManagerConsole() {
 									uploadFile.size === 0 ||
 									uploadFile.size > MAX_UPLOAD_BYTES
 								) {
-									setStatus({
-										message: "File must be between 1 byte and 1024 MB.",
-										error: true,
-									});
+									toast.error("File must be between 1 byte and 1024 MB.");
 									return;
 								}
 								void uploadMutation.mutateAsync(uploadFile);

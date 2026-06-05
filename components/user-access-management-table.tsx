@@ -25,7 +25,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -577,13 +577,8 @@ export function UserAccessManagementTable() {
 								<TableRow>
 									<TableHead className="w-10">
 										<Checkbox
-											checked={
-												allFilteredSelected
-													? true
-													: someFilteredSelected
-														? "indeterminate"
-														: false
-											}
+											checked={allFilteredSelected}
+											indeterminate={!allFilteredSelected && someFilteredSelected}
 											onCheckedChange={(checked) =>
 												toggleSelectAllFiltered(checked === true)
 											}
@@ -689,18 +684,11 @@ export function UserAccessManagementTable() {
 												</TableCell>
 												<TableCell className="text-right">
 													<DropdownMenu>
-														<DropdownMenuTrigger asChild>
-															<Button
-																variant="ghost"
-																size="sm"
-																className="h-8 w-8 p-0"
-																aria-label={`Actions for ${user.email}`}
-															>
-																<MoreHorizontal
-																	className="h-4 w-4"
-																	aria-hidden="true"
-																/>
-															</Button>
+														<DropdownMenuTrigger
+															className={buttonVariants({ variant: "ghost", size: "icon" })}
+															aria-label={`Actions for ${user.email}`}
+														>
+															<MoreHorizontal className="size-4" aria-hidden="true" />
 														</DropdownMenuTrigger>
 														<DropdownMenuContent align="end">
 															<DropdownMenuItem

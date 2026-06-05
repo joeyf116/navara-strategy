@@ -40,7 +40,7 @@ import {
 	BreadcrumbPage,
 	BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
 	Dialog,
@@ -479,15 +479,11 @@ export function FileManagerConsole() {
 					if (!entry) return null;
 					return (
 						<DropdownMenu>
-							<DropdownMenuTrigger asChild>
-								<Button
-									variant="ghost"
-									size="sm"
-									className="h-8 w-8 p-0"
-									aria-label={`Actions for ${entry.name}`}
-								>
-									<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-								</Button>
+							<DropdownMenuTrigger
+								className={buttonVariants({ variant: "ghost", size: "icon" })}
+								aria-label={`Actions for ${entry.name}`}
+							>
+								<MoreHorizontal className="size-4" aria-hidden="true" />
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
 								{entry.kind === "file" ? (
@@ -558,13 +554,10 @@ export function FileManagerConsole() {
 										{index === breadcrumbItems.length - 1 ? (
 											<BreadcrumbPage>{crumb.label}</BreadcrumbPage>
 										) : (
-											<BreadcrumbLink asChild>
-												<button
-													type="button"
-													onClick={() => navigateToPath(crumb.path)}
-												>
-													{crumb.label}
-												</button>
+											<BreadcrumbLink
+												render={<button type="button" onClick={() => navigateToPath(crumb.path)} />}
+											>
+												{crumb.label}
 											</BreadcrumbLink>
 										)}
 									</BreadcrumbItem>

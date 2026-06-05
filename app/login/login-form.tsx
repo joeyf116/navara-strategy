@@ -99,7 +99,8 @@ export function LoginForm({
 		if (result?.error) {
 			setError("Login failed.");
 		} else {
-			router.push(callbackUrl);
+			// Dev quick-logins land on the files page to see mock data immediately
+			router.push(callbackUrl === "/uploads" ? "/files" : callbackUrl);
 		}
 		setIsLoading(false);
 	}

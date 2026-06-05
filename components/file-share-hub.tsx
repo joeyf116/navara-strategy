@@ -4,6 +4,7 @@ import { Upload, Loader2 } from "lucide-react";
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -13,6 +14,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
 	Table,
 	TableBody,
@@ -30,6 +32,8 @@ type SharedFile = {
 	uploaded_at: string;
 };
 
+type Status = { message: string; error: boolean } | null;
+
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
 function formatUploadedAt(value: string) {
@@ -44,11 +48,17 @@ function formatUploadedAt(value: string) {
 	}).format(date);
 }
 
+function formatSize(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 	const queryClient = useQueryClient();
 	const [uploadedBy, setUploadedBy] = useState("");
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-	const [status, setStatus] = useState("");
+	const [status, setStatus] = useState<Status>(null);
 
 	const { data: files = [] } = useQuery<SharedFile[]>({
 		queryKey: ["shared-files"],
@@ -86,16 +96,19 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 			return body.file;
 		},
 		onSuccess: async (file) => {
-			setStatus(`Uploaded ${file.original_name}.`);
+			setStatus({ message: `Uploaded ${file.original_name}.`, error: false });
 			setSelectedFile(null);
 			await queryClient.invalidateQueries({ queryKey: ["shared-files"] });
 			const fileInput = document.getElementById(
-				"file",
+				"share-file",
 			) as HTMLInputElement | null;
 			if (fileInput) fileInput.value = "";
 		},
 		onError: (error) => {
-			setStatus(error instanceof Error ? error.message : "Upload failed");
+			setStatus({
+				message: error instanceof Error ? error.message : "Upload failed",
+				error: true,
+			});
 		},
 	});
 
@@ -105,16 +118,16 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 		event.preventDefault();
 
 		if (!selectedFile || !uploadedBy.trim()) {
-			setStatus("Provide your name and choose a file.");
+			setStatus({ message: "Provide your name and choose a file.", error: true });
 			return;
 		}
 
 		if (selectedFile.size === 0 || selectedFile.size > MAX_UPLOAD_BYTES) {
-			setStatus("File must be between 1 byte and 1024MB.");
+			setStatus({ message: "File must be between 1 byte and 1 GB.", error: true });
 			return;
 		}
 
-		setStatus("");
+		setStatus(null);
 		await uploadMutation.mutateAsync({
 			file: selectedFile,
 			uploadedBy: uploadedBy.trim(),
@@ -122,110 +135,127 @@ export function FileShareHub({ initialFiles }: { initialFiles: SharedFile[] }) {
 	}
 
 	return (
-		<main className="min-h-screen bg-background px-4 py-6 text-foreground">
-			<div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
-				<Card>
-					<CardHeader className="pb-3">
-						<CardTitle>Navara File Share Hub</CardTitle>
-						<CardDescription>
-							Upload and track shared files in one place.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className="space-y-3">
-						<form
-							className="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
-							onSubmit={handleSubmit}
-						>
-							<Input
-								name="uploadedBy"
-								aria-label="Uploader name"
-								placeholder="Client name"
-								value={uploadedBy}
-								onChange={(event) => setUploadedBy(event.target.value)}
-								required
-							/>
-							<Input
-								id="file"
-								name="file"
-								aria-label="File to upload"
-								type="file"
-								onChange={(event) =>
-									setSelectedFile(event.target.files?.[0] ?? null)
-								}
-								required
-							/>
-							<Button
-								type="submit"
-								size="sm"
-								disabled={uploadMutation.isPending}
-							>
-								<Upload className="h-4 w-4" />
-								{uploadMutation.isPending ? (
-									<Loader2 className="h-4 w-4 animate-spin" />
-								) : null}
-								{uploadMutation.isPending ? "Uploading..." : "Upload"}
-							</Button>
-						</form>
-						<p className="text-xs text-muted-foreground">
-							Shared files:{" "}
-							<span className="font-medium text-foreground">{totalShared}</span>
-						</p>
-						<p className="text-xs text-muted-foreground">
-							Maximum file size:{" "}
-							<span className="font-medium text-foreground">1 GB</span>
-						</p>
-						{status ? (
-							<p className="text-xs text-muted-foreground">{status}</p>
-						) : null}
-					</CardContent>
-				</Card>
+		<main className="min-h-screen bg-background">
+			<div className="container mx-auto max-w-4xl px-4 py-6">
+				<div className="mb-6">
+					<h1 className="text-2xl font-semibold tracking-tight">
+						Navara File Share Hub
+					</h1>
+					<p className="mt-1 text-sm text-muted-foreground">
+						Upload and track shared files in one place.
+					</p>
+				</div>
 
-				<Card>
-					<CardHeader className="pb-3">
-						<CardTitle>Recent uploads</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead className="h-8 text-xs">File</TableHead>
-									<TableHead className="h-8 text-xs">Uploaded by</TableHead>
-									<TableHead className="h-8 text-xs">Size</TableHead>
-									<TableHead className="h-8 text-xs">Uploaded at</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{files.length === 0 ? (
+				<div className="space-y-4">
+					<Card>
+						<CardHeader>
+							<CardTitle>Upload a file</CardTitle>
+							<CardDescription>
+								Maximum file size:{" "}
+								<span className="font-medium text-foreground">1 GB</span>
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							<form className="space-y-4" onSubmit={handleSubmit}>
+								<div className="grid gap-4 sm:grid-cols-2">
+									<div className="space-y-2">
+										<Label htmlFor="share-uploaded-by">Your name</Label>
+										<Input
+											id="share-uploaded-by"
+											name="uploadedBy"
+											placeholder="Client name"
+											value={uploadedBy}
+											onChange={(event) => setUploadedBy(event.target.value)}
+											required
+										/>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="share-file">File</Label>
+										<Input
+											id="share-file"
+											name="file"
+											type="file"
+											onChange={(event) =>
+												setSelectedFile(event.target.files?.[0] ?? null)
+											}
+											required
+										/>
+									</div>
+								</div>
+
+								{status ? (
+									<Alert variant={status.error ? "destructive" : "default"}>
+										<AlertDescription>{status.message}</AlertDescription>
+									</Alert>
+								) : null}
+
+								<div className="flex items-center justify-between gap-4">
+									<p className="text-sm text-muted-foreground">
+										{totalShared} file{totalShared === 1 ? "" : "s"} shared
+									</p>
+									<Button
+										type="submit"
+										disabled={uploadMutation.isPending}
+									>
+										{uploadMutation.isPending ? (
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										) : (
+											<Upload className="mr-2 h-4 w-4" />
+										)}
+										{uploadMutation.isPending ? "Uploading..." : "Upload"}
+									</Button>
+								</div>
+							</form>
+						</CardContent>
+					</Card>
+
+					<Card>
+						<CardHeader>
+							<CardTitle>Recent uploads</CardTitle>
+						</CardHeader>
+						<CardContent className="px-0 pb-0">
+							<Table>
+								<TableHeader>
 									<TableRow>
-										<TableCell
-											colSpan={4}
-											className="py-4 text-xs text-muted-foreground"
-										>
-											No files uploaded yet.
-										</TableCell>
+										<TableHead>File</TableHead>
+										<TableHead>Uploaded by</TableHead>
+										<TableHead>Size</TableHead>
+										<TableHead>Uploaded at</TableHead>
 									</TableRow>
-								) : (
-									files.map((file) => (
-										<TableRow key={file.id}>
-											<TableCell className="py-2 text-sm">
-												{file.original_name}
-											</TableCell>
-											<TableCell className="py-2 text-xs text-muted-foreground">
-												{file.uploaded_by}
-											</TableCell>
-											<TableCell className="py-2 text-xs text-muted-foreground">
-												{Math.max(1, Math.round(file.size_bytes / 1024))} KB
-											</TableCell>
-											<TableCell className="py-2 text-xs text-muted-foreground">
-												{formatUploadedAt(file.uploaded_at)}
+								</TableHeader>
+								<TableBody>
+									{files.length === 0 ? (
+										<TableRow>
+											<TableCell
+												colSpan={4}
+												className="py-10 text-center text-sm text-muted-foreground"
+											>
+												No files uploaded yet.
 											</TableCell>
 										</TableRow>
-									))
-								)}
-							</TableBody>
-						</Table>
-					</CardContent>
-				</Card>
+									) : (
+										files.map((file) => (
+											<TableRow key={file.id}>
+												<TableCell className="font-medium">
+													{file.original_name}
+												</TableCell>
+												<TableCell className="text-sm text-muted-foreground">
+													{file.uploaded_by}
+												</TableCell>
+												<TableCell className="text-sm text-muted-foreground">
+													{formatSize(file.size_bytes)}
+												</TableCell>
+												<TableCell className="text-sm text-muted-foreground">
+													{formatUploadedAt(file.uploaded_at)}
+												</TableCell>
+											</TableRow>
+										))
+									)}
+								</TableBody>
+							</Table>
+						</CardContent>
+					</Card>
+				</div>
 			</div>
 		</main>
 	);

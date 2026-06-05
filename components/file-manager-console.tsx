@@ -20,8 +20,28 @@ import {
 } from "lucide-react";
 
 import { CreateCompanyDialog } from "@/components/create-company-dialog";
+import { PageHeader } from "@/components/common/page-header";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -451,7 +471,7 @@ export function FileManagerConsole() {
 			},
 			{
 				id: "actions",
-				header: "Actions",
+				header: () => <span className="sr-only">Actions</span>,
 				cell: ({ row }) => {
 					const item = row.original;
 					if (item.kind === "go-back") return null;
@@ -461,9 +481,9 @@ export function FileManagerConsole() {
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<Button
-									variant="outline"
+									variant="ghost"
 									size="sm"
-									className="h-7 w-7 p-0"
+									className="h-8 w-8 p-0"
 									aria-label={`Actions for ${entry.name}`}
 								>
 									<MoreHorizontal className="h-4 w-4" aria-hidden="true" />
@@ -514,109 +534,96 @@ export function FileManagerConsole() {
 
 	return (
 		<>
-			<div className="space-y-3">
-				<div className="flex flex-wrap items-start justify-between gap-2">
-					<div>
-						<h1 className="text-xl font-semibold text-balance">Files</h1>
-						<p className="text-xs text-muted-foreground">
-							Browse company folders and manage file operations.
-						</p>
+			<div className="space-y-4">
+				<PageHeader
+					title="Files"
+					description="Browse company folders and manage file operations."
+					actions={
+						connection?.isSuperAdmin ? (
+							<CreateCompanyDialog
+								onCreated={(message) => setStatus({ message })}
+								disabled={isFetching}
+							/>
+						) : undefined
+					}
+				/>
+
+				<div className="space-y-3">
+					<Breadcrumb>
+						<BreadcrumbList>
+							{breadcrumbItems.map((crumb, index) => (
+								<span key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
+									{index > 0 ? <BreadcrumbSeparator /> : null}
+									<BreadcrumbItem>
+										{index === breadcrumbItems.length - 1 ? (
+											<BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+										) : (
+											<BreadcrumbLink asChild>
+												<button
+													type="button"
+													onClick={() => navigateToPath(crumb.path)}
+												>
+													{crumb.label}
+												</button>
+											</BreadcrumbLink>
+										)}
+									</BreadcrumbItem>
+								</span>
+							))}
+						</BreadcrumbList>
+					</Breadcrumb>
+
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setDialog({ type: "newFolder" })}
+						>
+							<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+							New Folder
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setDialog({ type: "upload" })}
+							disabled={uploadMutation.isPending}
+						>
+							<Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+							Upload File
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => void refreshMutation.mutateAsync()}
+							disabled={refreshMutation.isPending}
+						>
+							<RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+							Refresh
+						</Button>
 					</div>
-					{connection?.isSuperAdmin ? (
-						<CreateCompanyDialog
-							onCreated={(message) => setStatus({ message })}
-							disabled={isFetching}
-						/>
+
+					{uploadProgress !== null ? (
+						<div className="space-y-1.5">
+							<p className="text-sm text-muted-foreground">
+								Uploading to {destinationLabel} — {uploadProgress}%
+							</p>
+							<div className="h-1.5 w-full rounded-full bg-muted">
+								<div
+									className="h-full rounded-full bg-primary transition-[width]"
+									style={{ width: `${uploadProgress}%` }}
+								/>
+							</div>
+						</div>
+					) : null}
+
+					{activeStatus ? (
+						<Alert variant={activeStatus.error ? "destructive" : "default"}>
+							<AlertDescription>{activeStatus.message}</AlertDescription>
+						</Alert>
 					) : null}
 				</div>
 
 				<Card>
-					<CardHeader className="space-y-2 pb-2">
-						<CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-							Actions in: {destinationLabel}
-						</CardTitle>
-						<div className="flex flex-wrap items-center gap-2 text-xs">
-							{breadcrumbItems.map((crumb, index) => (
-								<span
-									key={`${crumb.label}-${index}`}
-									className="flex items-center gap-1"
-								>
-									{index > 0 ? (
-										<ChevronRight
-											className="h-3.5 w-3.5 text-muted-foreground"
-											aria-hidden="true"
-										/>
-									) : null}
-									<button
-										type="button"
-										onClick={() => navigateToPath(crumb.path)}
-										className={
-											index === breadcrumbItems.length - 1
-												? "font-medium text-foreground"
-												: "text-muted-foreground hover:text-foreground"
-										}
-									>
-										{crumb.label}
-									</button>
-								</span>
-							))}
-						</div>
-
-						<div className="flex flex-wrap items-center gap-1.5">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => setDialog({ type: "newFolder" })}
-								className="h-8 px-2.5"
-							>
-								<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-								New Folder
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => setDialog({ type: "upload" })}
-								disabled={uploadMutation.isPending}
-								className="h-8 px-2.5"
-							>
-								<Upload className="mr-2 h-4 w-4" aria-hidden="true" />
-								Upload File
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => void refreshMutation.mutateAsync()}
-								disabled={refreshMutation.isPending}
-								className="h-8 px-2.5"
-							>
-								<RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-								Refresh
-							</Button>
-						</div>
-
-						{uploadProgress !== null ? (
-							<div className="space-y-1">
-								<p className="text-[11px] text-muted-foreground">
-									Uploading to {destinationLabel} {uploadProgress}%
-								</p>
-								<div className="h-1.5 w-full rounded-full bg-muted">
-									<div
-										className="h-full rounded-full bg-primary transition-[width]"
-										style={{ width: `${uploadProgress}%` }}
-									/>
-								</div>
-							</div>
-						) : null}
-
-						{activeStatus ? (
-							<p
-								className={`text-xs ${activeStatus.error ? "text-destructive" : "text-muted-foreground"}`}
-							>
-								{activeStatus.message}
-							</p>
-						) : null}
-					</CardHeader>
-
 					<CardContent className="px-0 pb-0">
 						<Table>
 							<TableHeader>
@@ -638,7 +645,7 @@ export function FileManagerConsole() {
 							<TableBody>
 								{isFetching ? (
 									<TableRow>
-										<TableCell colSpan={4} className="py-6 text-center">
+										<TableCell colSpan={4} className="py-10 text-center">
 											<Loader2
 												className="mx-auto h-5 w-5 animate-spin text-muted-foreground"
 												aria-hidden="true"
@@ -649,7 +656,7 @@ export function FileManagerConsole() {
 									<TableRow>
 										<TableCell
 											colSpan={4}
-											className="py-6 text-center text-xs text-muted-foreground"
+											className="py-10 text-center text-sm text-muted-foreground"
 										>
 											No items in this directory.
 										</TableCell>
@@ -674,19 +681,20 @@ export function FileManagerConsole() {
 				</Card>
 			</div>
 
+			{/* New Folder dialog */}
 			<Dialog
 				open={dialog.type === "newFolder"}
 				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Create New Folder</DialogTitle>
+						<DialogTitle>Create new folder</DialogTitle>
 						<DialogDescription>
-							This folder will be created inside: {destinationLabel}
+							This folder will be created inside {destinationLabel}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-1.5">
-						<Label htmlFor="folder-name">Folder Name</Label>
+						<Label htmlFor="folder-name">Folder name</Label>
 						<Input
 							id="folder-name"
 							name="folderName"
@@ -718,7 +726,7 @@ export function FileManagerConsole() {
 							disabled={!folderName.trim() || isDialogWorking}
 						>
 							{createFolderMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
 							) : null}
 							Create Folder
 						</Button>
@@ -726,6 +734,7 @@ export function FileManagerConsole() {
 				</DialogContent>
 			</Dialog>
 
+			{/* Upload dialog */}
 			<Dialog
 				open={dialog.type === "upload"}
 				onOpenChange={(open) => {
@@ -737,13 +746,13 @@ export function FileManagerConsole() {
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Upload File</DialogTitle>
+						<DialogTitle>Upload file</DialogTitle>
 						<DialogDescription>
-							This file will be uploaded inside: {destinationLabel}
+							This file will be uploaded to {destinationLabel}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-2">
-						<Label htmlFor="upload-file">Select File</Label>
+						<Label htmlFor="upload-file">Select file</Label>
 						<Input
 							id="upload-file"
 							type="file"
@@ -757,7 +766,7 @@ export function FileManagerConsole() {
 								if (selected.size === 0 || selected.size > MAX_UPLOAD_BYTES) {
 									setUploadFile(null);
 									setStatus({
-										message: "File must be between 1 byte and 1024MB.",
+										message: "File must be between 1 byte and 1024 MB.",
 										error: true,
 									});
 									if (uploadInputRef.current) {
@@ -768,7 +777,7 @@ export function FileManagerConsole() {
 								setUploadFile(selected);
 							}}
 						/>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							Maximum file size:{" "}
 							<span className="font-medium text-foreground">1 GB</span>
 						</p>
@@ -792,7 +801,7 @@ export function FileManagerConsole() {
 									uploadFile.size > MAX_UPLOAD_BYTES
 								) {
 									setStatus({
-										message: "File must be between 1 byte and 1024MB.",
+										message: "File must be between 1 byte and 1024 MB.",
 										error: true,
 									});
 									return;
@@ -802,7 +811,7 @@ export function FileManagerConsole() {
 							disabled={!uploadFile || isDialogWorking}
 						>
 							{uploadMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
 							) : null}
 							Upload
 						</Button>
@@ -810,20 +819,21 @@ export function FileManagerConsole() {
 				</DialogContent>
 			</Dialog>
 
+			{/* Rename dialog */}
 			<Dialog
 				open={dialog.type === "rename"}
 				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
 				<DialogContent>
 					<DialogHeader>
-						<DialogTitle>Rename</DialogTitle>
+						<DialogTitle>Rename item</DialogTitle>
 						<DialogDescription>
 							Choose a new name for{" "}
 							{dialog.type === "rename" ? dialog.entry.name : "this item"}.
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-1.5">
-						<Label htmlFor="rename-name">New Name</Label>
+						<Label htmlFor="rename-name">New name</Label>
 						<Input
 							id="rename-name"
 							name="renameName"
@@ -859,7 +869,7 @@ export function FileManagerConsole() {
 							}
 						>
 							{renameMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
 							) : null}
 							Save
 						</Button>
@@ -867,44 +877,43 @@ export function FileManagerConsole() {
 				</DialogContent>
 			</Dialog>
 
-			<Dialog
+			{/* Delete confirmation — AlertDialog for destructive action */}
+			<AlertDialog
 				open={dialog.type === "delete"}
 				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
 			>
-				<DialogContent>
-					<DialogHeader>
-						<DialogTitle>Delete Item</DialogTitle>
-						<DialogDescription>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Delete item</AlertDialogTitle>
+						<AlertDialogDescription>
 							This will permanently remove{" "}
-							{dialog.type === "delete" ? dialog.entry.name : "this item"}.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setDialog({ type: "closed" })}
-							disabled={isDialogWorking}
-						>
+							<span className="font-medium text-foreground">
+								{dialog.type === "delete" ? dialog.entry.name : "this item"}
+							</span>
+							. This action cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={deleteMutation.isPending}>
 							Cancel
-						</Button>
-						<Button
-							variant="outline"
-							className="text-destructive hover:text-destructive"
+						</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 							onClick={() => {
 								if (dialog.type === "delete") {
 									void deleteMutation.mutateAsync(dialog.entry.id);
 								}
 							}}
-							disabled={dialog.type !== "delete" || isDialogWorking}
+							disabled={dialog.type !== "delete" || deleteMutation.isPending}
 						>
 							{deleteMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
 							) : null}
 							Delete
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 }

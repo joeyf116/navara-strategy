@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 
+import { PageHeader } from "@/components/common/page-header";
 import { UserAccessManagementTable } from "@/components/user-access-management-table";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -92,7 +94,7 @@ function CopyField({
 					aria-label={`Copy ${label}`}
 				>
 					{copied ? (
-						<Check className="h-4 w-4 text-green-600" />
+						<Check className="h-4 w-4 text-success" />
 					) : (
 						<Copy className="h-4 w-4" />
 					)}
@@ -134,13 +136,11 @@ export default function SettingsPage() {
 	});
 
 	return (
-		<div className="space-y-4">
-			<div className="space-y-1">
-				<h1 className="text-xl font-semibold text-balance">Settings</h1>
-				<p className="text-xs text-muted-foreground">
-					Connection details and user access controls.
-				</p>
-			</div>
+		<div className="space-y-6">
+			<PageHeader
+				title="Settings"
+				description="Connection details and user access controls."
+			/>
 
 			{connection?.isSuperAdmin ? <UserAccessManagementTable /> : null}
 
@@ -152,31 +152,28 @@ export default function SettingsPage() {
 						settings for admin SQL access.
 					</CardDescription>
 				</CardHeader>
-				<CardContent className="space-y-3">
+				<CardContent className="space-y-4">
 					<Tabs defaultValue="webdav">
-						<TabsList className="h-8">
+						<TabsList>
 							<TabsTrigger value="webdav">WebDAV</TabsTrigger>
 							<TabsTrigger value="sftp">SFTP</TabsTrigger>
 							{connection?.isSuperAdmin ? (
 								<TabsTrigger value="database">Database</TabsTrigger>
 							) : null}
 						</TabsList>
-						<TabsContent value="webdav" className="space-y-3 pt-2">
+						<TabsContent value="webdav" className="space-y-3 pt-4">
 							<CopyField
 								label="WebDAV URL"
 								value={connection?.webdavUrl ?? ""}
 							/>
-							<p className="text-xs text-muted-foreground">
+							<p className="text-sm text-muted-foreground">
 								Map this URL as a network drive in Windows File Explorer or
 								connect in macOS Finder with Connect to Server.
 							</p>
 						</TabsContent>
-						<TabsContent value="sftp" className="space-y-3 pt-2">
+						<TabsContent value="sftp" className="space-y-3 pt-4">
 							<div className="grid gap-3 sm:grid-cols-2">
-								<CopyField
-									label="Host"
-									value={connection?.sftpEndpoint ?? ""}
-								/>
+								<CopyField label="Host" value={connection?.sftpEndpoint ?? ""} />
 								<CopyField label="Port" value="22" />
 								<CopyField
 									label="Username"
@@ -192,7 +189,7 @@ export default function SettingsPage() {
 							) : null}
 						</TabsContent>
 						{connection?.isSuperAdmin ? (
-							<TabsContent value="database" className="space-y-3 pt-2">
+							<TabsContent value="database" className="space-y-4 pt-4">
 								{connection.database ? (
 									<>
 										<div className="grid gap-3 sm:grid-cols-2">
@@ -231,7 +228,7 @@ export default function SettingsPage() {
 											value={`psql "${connection.database.connectionString}"`}
 										/>
 
-										<div className="flex flex-wrap items-center gap-2">
+										<div className="flex flex-wrap items-center gap-3">
 											<Button
 												variant="outline"
 												onClick={() => {
@@ -242,24 +239,24 @@ export default function SettingsPage() {
 											>
 												{verifyDatabaseMutation.isPending
 													? "Verifying..."
-													: "Verify Database Connection"}
+													: "Verify database connection"}
 											</Button>
-											<p className="text-xs text-muted-foreground">
+											<p className="text-sm text-muted-foreground">
 												Verifies real connectivity using the server-side
 												DATABASE_URL.
 											</p>
 										</div>
 
 										{dbStatus ? (
-											<p
-												className={`text-xs ${dbStatus.error ? "text-destructive" : "text-muted-foreground"}`}
+											<Alert
+												variant={dbStatus.error ? "destructive" : "default"}
 											>
-												{dbStatus.message}
-											</p>
+												<AlertDescription>{dbStatus.message}</AlertDescription>
+											</Alert>
 										) : null}
 									</>
 								) : (
-									<p className="text-xs text-muted-foreground">
+									<p className="text-sm text-muted-foreground">
 										DATABASE_URL is not configured in the application runtime.
 									</p>
 								)}
@@ -269,19 +266,19 @@ export default function SettingsPage() {
 
 					<Separator />
 
-					<div className="space-y-2 text-xs text-muted-foreground">
-						<p className="font-medium text-foreground">Client Shortcuts</p>
+					<div className="space-y-2 text-sm text-muted-foreground">
+						<p className="font-medium text-foreground">Client shortcuts</p>
 						<p>
 							FileZilla / WinSCP / Cyberduck: use SFTP, host + port 22, username
 							= portal email.
 						</p>
 						<p>
-							For persistent drive mapping on Windows, install
+							For persistent drive mapping on Windows, install{" "}
 							<a
 								href="https://github.com/winfsp/sshfs-win#installation"
 								target="_blank"
 								rel="noopener noreferrer"
-								className="ml-1 underline"
+								className="underline underline-offset-4 hover:text-foreground"
 							>
 								SSHFS-Win
 							</a>
@@ -290,7 +287,7 @@ export default function SettingsPage() {
 					</div>
 
 					{connection?.companies?.length ? (
-						<p className="text-[11px] text-muted-foreground">
+						<p className="text-xs text-muted-foreground">
 							Accessible companies: {connection.companies.join(", ")}
 						</p>
 					) : null}

@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const DEV_ACCOUNTS = [
 	{ email: "superadmin@navara.io", label: "Super Admin" },
@@ -104,29 +105,35 @@ export function LoginForm({
 	}
 
 	return (
-		<div className="flex min-h-screen items-center justify-center bg-background px-4">
+		<main className="flex min-h-screen items-center justify-center bg-background px-4">
 			<div className="w-full max-w-md space-y-6">
-				{/* Header */}
 				<div className="text-center">
 					<div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
 						<span className="text-lg font-bold text-primary-foreground">N</span>
 					</div>
-					<h1 className="mt-4 text-2xl font-bold">Navara File Portal</h1>
-					<p className="text-muted-foreground">
-						Sign in to access the secure file sharing portal
+					<h1 className="mt-4 text-2xl font-semibold tracking-tight">
+						Navara File Portal
+					</h1>
+					<p className="mt-1 text-sm text-muted-foreground">
+						Sign in to access the secure file sharing portal.
 					</p>
 				</div>
 
-				{/* AWS Cognito Login */}
+				{error ? (
+					<Alert variant="destructive">
+						<AlertDescription>{error}</AlertDescription>
+					</Alert>
+				) : null}
+
 				{!showDevLogin && hasCognito && (
 					<Card>
 						<CardHeader>
-							<CardTitle>Sign In</CardTitle>
+							<CardTitle>Sign in</CardTitle>
 							<CardDescription>
-								Sign in with your organization account
+								Sign in with your organization account.
 							</CardDescription>
 						</CardHeader>
-						<CardContent className="space-y-4">
+						<CardContent>
 							<Button
 								className="w-full"
 								onClick={handleCognitoSignIn}
@@ -134,18 +141,16 @@ export function LoginForm({
 							>
 								{isLoading ? "Redirecting to AWS..." : "Sign in with AWS"}
 							</Button>
-							{error && <p className="text-sm text-destructive">{error}</p>}
 						</CardContent>
 					</Card>
 				)}
 
-				{/* Dev Mode Login */}
 				{showDevLogin && isDev && (
 					<>
 						<Card>
 							<CardHeader>
 								<CardTitle className="flex items-center gap-2">
-									Dev Login
+									Dev login
 									<Badge
 										variant="outline"
 										className="border-amber-500 text-amber-500"
@@ -154,7 +159,7 @@ export function LoginForm({
 									</Badge>
 								</CardTitle>
 								<CardDescription>
-									Sign in with a demo account to test RBAC roles locally
+									Sign in with a demo account to test RBAC roles locally.
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
@@ -181,9 +186,8 @@ export function LoginForm({
 											required
 										/>
 									</div>
-									{error && <p className="text-sm text-destructive">{error}</p>}
 									<Button type="submit" className="w-full" disabled={isLoading}>
-										{isLoading ? "Signing in..." : "Sign In"}
+										{isLoading ? "Signing in..." : "Sign in"}
 									</Button>
 								</form>
 							</CardContent>
@@ -191,9 +195,9 @@ export function LoginForm({
 
 						<Card>
 							<CardHeader>
-								<CardTitle className="text-base">Quick Role Select</CardTitle>
-								<CardDescription className="text-xs">
-									Click a role to sign in instantly
+								<CardTitle className="text-base">Quick role select</CardTitle>
+								<CardDescription>
+									Click a role to sign in instantly.
 								</CardDescription>
 							</CardHeader>
 							<CardContent className="space-y-2">
@@ -214,11 +218,10 @@ export function LoginForm({
 					</>
 				)}
 
-				{/* Toggle between prod/dev login when both are available */}
 				{isDev && hasCognito && (
 					<div className="text-center">
 						<Button
-							variant="outline"
+							variant="ghost"
 							size="sm"
 							onClick={() => setShowDevLogin((v) => !v)}
 						>
@@ -229,6 +232,6 @@ export function LoginForm({
 					</div>
 				)}
 			</div>
-		</div>
+		</main>
 	);
 }

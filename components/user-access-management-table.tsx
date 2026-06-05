@@ -12,6 +12,17 @@ import {
 	Users,
 } from "lucide-react";
 
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -456,7 +467,7 @@ export function UserAccessManagementTable() {
 	) {
 		if (allCompanies.length === 0) {
 			return (
-				<p className="text-xs text-muted-foreground">
+				<p className="text-sm text-muted-foreground">
 					No companies available yet.
 				</p>
 			);
@@ -468,10 +479,10 @@ export function UserAccessManagementTable() {
 			return (
 				<div
 					key={`${target}:${companyId}`}
-					className="rounded-xl border border-border/70 bg-muted/20 px-3 py-2"
+					className="rounded-lg border border-border bg-muted/20 px-3 py-2"
 				>
 					<div className="flex items-center justify-between gap-3">
-						<label className="flex items-center gap-2 text-sm font-medium">
+						<label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
 							<Checkbox
 								checked={checked}
 								onCheckedChange={(value) =>
@@ -483,7 +494,7 @@ export function UserAccessManagementTable() {
 								{companyId}
 							</span>
 						</label>
-						<div className="flex items-center gap-2 text-xs text-muted-foreground">
+						<div className="flex items-center gap-2 text-sm text-muted-foreground">
 							<span>Write</span>
 							<Switch
 								checked={grant?.canWrite ?? false}
@@ -501,8 +512,8 @@ export function UserAccessManagementTable() {
 
 	return (
 		<>
-			<Card className="overflow-hidden border-border/70 shadow-sm">
-				<CardHeader className="space-y-1 border-b border-border/60 bg-muted/10">
+			<Card>
+				<CardHeader className="border-b border-border">
 					<CardTitle>User Management</CardTitle>
 					<CardDescription>
 						Create Cognito-backed users, remove users, and manage company
@@ -520,7 +531,7 @@ export function UserAccessManagementTable() {
 									value={search}
 									onChange={(event) => setSearch(event.target.value)}
 									placeholder="Search users by name or email"
-									className="h-11 rounded-xl pl-9"
+									className="pl-9"
 								/>
 							</div>
 							<Select
@@ -529,7 +540,7 @@ export function UserAccessManagementTable() {
 									setStatusFilter(value as UserStatusFilter)
 								}
 							>
-								<SelectTrigger className="h-11 w-full rounded-xl sm:w-45">
+								<SelectTrigger className="w-full sm:w-44">
 									<SelectValue placeholder="All statuses" />
 								</SelectTrigger>
 								<SelectContent>
@@ -544,31 +555,26 @@ export function UserAccessManagementTable() {
 							<Button
 								variant="outline"
 								size="sm"
-								className="h-11 rounded-xl px-4"
 								onClick={() => {
 									setBulkGrantDraft({});
 									setBulkDialogOpen(true);
 								}}
 								disabled={selectedUserEmails.length === 0}
 							>
-								<Users className="h-4 w-4" aria-hidden="true" />
+								<Users className="mr-2 h-4 w-4" aria-hidden="true" />
 								Bulk Access ({selectedUserEmails.length})
 							</Button>
-							<Button
-								size="sm"
-								className="h-11 rounded-xl px-4"
-								onClick={openCreateDialog}
-							>
-								<Plus className="h-4 w-4" aria-hidden="true" />
+							<Button size="sm" onClick={openCreateDialog}>
+								<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
 								Add User
 							</Button>
 						</div>
 					</div>
 
-					<div className="overflow-hidden rounded-2xl border border-border/70 bg-background">
+					<div className="overflow-hidden rounded-lg border border-border">
 						<Table>
-							<TableHeader className="bg-muted/20">
-								<TableRow className="hover:bg-muted/20">
+							<TableHeader>
+								<TableRow>
 									<TableHead className="w-10">
 										<Checkbox
 											checked={
@@ -588,7 +594,9 @@ export function UserAccessManagementTable() {
 									<TableHead>Status</TableHead>
 									<TableHead>Company Access</TableHead>
 									<TableHead>Updated</TableHead>
-									<TableHead className="w-14 text-right">Actions</TableHead>
+									<TableHead className="w-14 text-right">
+										<span className="sr-only">Actions</span>
+									</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -605,7 +613,7 @@ export function UserAccessManagementTable() {
 									<TableRow>
 										<TableCell
 											colSpan={6}
-											className="py-8 text-center text-sm text-muted-foreground"
+											className="py-10 text-center text-sm text-muted-foreground"
 										>
 											No users matched the current filters.
 										</TableCell>
@@ -618,7 +626,7 @@ export function UserAccessManagementTable() {
 										return (
 											<TableRow
 												key={user.username}
-												className={selected ? "bg-accent/20" : "bg-background"}
+												className={selected ? "bg-accent/20" : undefined}
 											>
 												<TableCell>
 													<Checkbox
@@ -631,7 +639,7 @@ export function UserAccessManagementTable() {
 												</TableCell>
 												<TableCell>
 													<div className="flex items-center gap-3">
-														<Avatar className="h-10 w-10 border border-border/70">
+														<Avatar className="h-8 w-8">
 															<AvatarFallback>
 																{getInitials(user.name, user.email)}
 															</AvatarFallback>
@@ -653,7 +661,7 @@ export function UserAccessManagementTable() {
 												</TableCell>
 												<TableCell>
 													{grants.length === 0 ? (
-														<span className="text-xs text-muted-foreground">
+														<span className="text-sm text-muted-foreground">
 															None
 														</span>
 													) : (
@@ -683,9 +691,9 @@ export function UserAccessManagementTable() {
 													<DropdownMenu>
 														<DropdownMenuTrigger asChild>
 															<Button
-																variant="outline"
+																variant="ghost"
 																size="sm"
-																className="h-9 w-9 rounded-xl p-0"
+																className="h-8 w-8 p-0"
 																aria-label={`Actions for ${user.email}`}
 															>
 																<MoreHorizontal
@@ -710,7 +718,7 @@ export function UserAccessManagementTable() {
 																}}
 															>
 																<Trash2
-																	className="h-4 w-4"
+																	className="mr-2 h-4 w-4"
 																	aria-hidden="true"
 																/>
 																Remove User
@@ -738,32 +746,33 @@ export function UserAccessManagementTable() {
 					</div>
 
 					{statusMessage ? (
-						<p className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-sm text-success">
-							{statusMessage}
-						</p>
+						<Alert>
+							<AlertDescription>{statusMessage}</AlertDescription>
+						</Alert>
 					) : null}
 					{errorMessage ? (
-						<p className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-							{errorMessage}
-						</p>
+						<Alert variant="destructive">
+							<AlertDescription>{errorMessage}</AlertDescription>
+						</Alert>
 					) : null}
 				</CardContent>
 			</Card>
 
+			{/* Edit company access dialog */}
 			<Dialog
 				open={Boolean(editingEmail)}
 				onOpenChange={(open) =>
 					!open && (setEditingEmail(null), setGrantDraft({}))
 				}
 			>
-				<DialogContent className="max-w-2xl rounded-2xl">
+				<DialogContent className="max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>Edit Company Access</DialogTitle>
 						<DialogDescription>
 							{editingUser?.email ?? "Selected user"}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="max-h-104 space-y-2 overflow-y-auto pr-1">
+					<div className="max-h-96 space-y-2 overflow-y-auto pr-1">
 						{renderCompanyEditor(grantDraft, "single")}
 					</div>
 					<DialogFooter>
@@ -782,15 +791,15 @@ export function UserAccessManagementTable() {
 							disabled={saveUserAccessMutation.isPending || !editingEmail}
 						>
 							{saveUserAccessMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							) : (
-								"Save Access"
-							)}
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Save Access
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
+			{/* Bulk access dialog */}
 			<Dialog
 				open={bulkDialogOpen}
 				onOpenChange={(open) => {
@@ -798,7 +807,7 @@ export function UserAccessManagementTable() {
 					if (!open) setBulkGrantDraft({});
 				}}
 			>
-				<DialogContent className="max-w-2xl rounded-2xl">
+				<DialogContent className="max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>Bulk Update Company Access</DialogTitle>
 						<DialogDescription>
@@ -807,7 +816,7 @@ export function UserAccessManagementTable() {
 							be replaced.
 						</DialogDescription>
 					</DialogHeader>
-					<div className="max-h-104 space-y-2 overflow-y-auto pr-1">
+					<div className="max-h-96 space-y-2 overflow-y-auto pr-1">
 						{renderCompanyEditor(bulkGrantDraft, "bulk")}
 					</div>
 					<DialogFooter>
@@ -829,15 +838,15 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{saveBulkAccessMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							) : (
-								"Apply to Selected Users"
-							)}
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Apply to Selected Users
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
+			{/* Create user dialog */}
 			<Dialog
 				open={createDialogOpen}
 				onOpenChange={(open) => {
@@ -845,7 +854,7 @@ export function UserAccessManagementTable() {
 					if (!open) setCreateGrantDraft({});
 				}}
 			>
-				<DialogContent className="max-w-2xl rounded-2xl">
+				<DialogContent className="max-w-2xl">
 					<DialogHeader>
 						<DialogTitle>Create User</DialogTitle>
 						<DialogDescription>
@@ -901,20 +910,19 @@ export function UserAccessManagementTable() {
 								}
 								required
 							/>
-							<p className="text-xs text-muted-foreground">
-								Cognito will require a permanent password reset on first
-								sign-in.
+							<p className="text-sm text-muted-foreground">
+								Cognito will require a permanent password reset on first sign-in.
 							</p>
 						</div>
 						<div className="space-y-2">
 							<div>
 								<p className="text-sm font-medium">Initial company access</p>
-								<p className="text-xs text-muted-foreground">
+								<p className="text-sm text-muted-foreground">
 									Optional. You can also assign access later from the row
 									actions.
 								</p>
 							</div>
-							<div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+							<div className="max-h-64 space-y-2 overflow-y-auto pr-1">
 								{renderCompanyEditor(createGrantDraft, "create")}
 							</div>
 						</div>
@@ -936,49 +944,48 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{createUserMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							) : (
-								"Create User"
-							)}
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Create User
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
-			<Dialog
+			{/* Delete user confirmation — AlertDialog for destructive action */}
+			<AlertDialog
 				open={Boolean(deleteEmail)}
 				onOpenChange={(open) => !open && setDeleteEmail(null)}
 			>
-				<DialogContent className="max-w-md rounded-2xl">
-					<DialogHeader>
-						<DialogTitle>Remove User</DialogTitle>
-						<DialogDescription>
-							This deletes the Cognito user and clears stored company-access
-							metadata for {deleteEmail ?? "the selected user"}.
-						</DialogDescription>
-					</DialogHeader>
-					<DialogFooter>
-						<Button
-							variant="outline"
-							onClick={() => setDeleteEmail(null)}
-							disabled={deleteUserMutation.isPending}
-						>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Remove user</AlertDialogTitle>
+						<AlertDialogDescription>
+							This deletes the Cognito user and clears all stored company-access
+							metadata for{" "}
+							<span className="font-medium text-foreground">
+								{deleteEmail ?? "the selected user"}
+							</span>
+							. This action cannot be undone.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={deleteUserMutation.isPending}>
 							Cancel
-						</Button>
-						<Button
+						</AlertDialogCancel>
+						<AlertDialogAction
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 							onClick={() => void deleteUserMutation.mutateAsync()}
 							disabled={deleteUserMutation.isPending || !deleteEmail}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{deleteUserMutation.isPending ? (
-								<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-							) : (
-								"Remove User"
-							)}
-						</Button>
-					</DialogFooter>
-				</DialogContent>
-			</Dialog>
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+							) : null}
+							Remove User
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</>
 	);
 }

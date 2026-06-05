@@ -52,7 +52,33 @@ const isDevMode =
 	process.env.NEXT_PUBLIC_DEV_MODE === "true";
 
 // Dev mode mock data — used when isDevMode && !filesBucket (no AWS configured locally)
-const DEV_MOCK_COMPANIES = ["acme-corp", "globex", "initech"];
+const DEV_MOCK_COMPANIES = [
+	"acme-corp",
+	"globex",
+	"initech",
+	"umbrella-corp",
+	"wayne-enterprises",
+	"stark-industries",
+	"cyberdyne-systems",
+	"weyland-yutani",
+	"oscorp-industries",
+	"soylent-corp",
+	"tyrell-corp",
+	"blue-sun",
+	"massive-dynamic",
+	"dharma-initiative",
+	"monarch-sciences",
+	"veridian-dynamics",
+	"dunder-mifflin",
+	"prestige-worldwide",
+	"pied-piper",
+	"hooli-tech",
+	"vought-international",
+	"nakatomi-corp",
+	"primatech-paper",
+	"virtucon",
+	"buy-n-large",
+];
 
 const DEV_MOCK_USERS: CognitoUserSummary[] = [
 	{

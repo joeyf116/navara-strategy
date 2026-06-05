@@ -22,7 +22,7 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -188,21 +188,22 @@ export function UserAccessManagementTable() {
 	const queryClient = useQueryClient();
 	const [search, setSearch] = useState("");
 	const [statusFilter, setStatusFilter] = useState<UserStatusFilter>("all");
-	const [statusMessage, setStatusMessage] = useState<string | null>(null);
-	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
 	const [editingEmail, setEditingEmail] = useState<string | null>(null);
 	const [grantDraft, setGrantDraft] = useState<Record<string, CompanyGrant>>(
 		{},
 	);
+	const [editCompanySearch, setEditCompanySearch] = useState("");
 
 	const [selectedUserEmails, setSelectedUserEmails] = useState<string[]>([]);
 	const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
 	const [bulkGrantDraft, setBulkGrantDraft] = useState<
 		Record<string, CompanyGrant>
 	>({});
+	const [bulkCompanySearch, setBulkCompanySearch] = useState("");
 
 	const [createDialogOpen, setCreateDialogOpen] = useState(false);
+	const [createCompanySearch, setCreateCompanySearch] = useState("");
 	const [createName, setCreateName] = useState("");
 	const [createEmail, setCreateEmail] = useState("");
 	const [createTemporaryPassword, setCreateTemporaryPassword] = useState(
@@ -245,15 +246,13 @@ export function UserAccessManagementTable() {
 			});
 		},
 		onSuccess: async () => {
-			setStatusMessage("User access updated.");
-			setErrorMessage(null);
+			toast.success("Company access updated.");
 			setEditingEmail(null);
 			setGrantDraft({});
 			await invalidateQueries();
 		},
 		onError: (error) => {
-			setStatusMessage(null);
-			setErrorMessage(
+			toast.error(
 				error instanceof Error ? error.message : "Failed to update access.",
 			);
 		},
@@ -275,18 +274,16 @@ export function UserAccessManagementTable() {
 			});
 		},
 		onSuccess: async () => {
-			setStatusMessage(
+			toast.success(
 				`Updated access for ${selectedUserEmails.length} user${selectedUserEmails.length === 1 ? "" : "s"}.`,
 			);
-			setErrorMessage(null);
 			setBulkDialogOpen(false);
 			setSelectedUserEmails([]);
 			setBulkGrantDraft({});
 			await invalidateQueries();
 		},
 		onError: (error) => {
-			setStatusMessage(null);
-			setErrorMessage(
+			toast.error(
 				error instanceof Error ? error.message : "Failed to apply bulk access.",
 			);
 		},
@@ -305,10 +302,10 @@ export function UserAccessManagementTable() {
 				}),
 			}),
 		onSuccess: async ({ user }) => {
-			setStatusMessage(
-				`Created ${user.email}. Share the temporary password securely; Cognito will force a password reset on first login.`,
-			);
-			setErrorMessage(null);
+			toast.success(`Created ${user.email}`, {
+				description:
+					"Share the temporary password securely. Cognito will force a reset on first login.",
+			});
 			setCreateDialogOpen(false);
 			setCreateName("");
 			setCreateEmail("");
@@ -317,8 +314,7 @@ export function UserAccessManagementTable() {
 			await invalidateQueries();
 		},
 		onError: (error) => {
-			setStatusMessage(null);
-			setErrorMessage(
+			toast.error(
 				error instanceof Error ? error.message : "Failed to create user.",
 			);
 		},
@@ -334,14 +330,12 @@ export function UserAccessManagementTable() {
 			});
 		},
 		onSuccess: async () => {
-			setStatusMessage(`Removed ${deleteEmail}.`);
-			setErrorMessage(null);
+			toast.success(`Removed ${deleteEmail}.`);
 			setDeleteEmail(null);
 			await invalidateQueries();
 		},
 		onError: (error) => {
-			setStatusMessage(null);
-			setErrorMessage(
+			toast.error(
 				error instanceof Error ? error.message : "Failed to remove user.",
 			);
 		},
@@ -380,17 +374,15 @@ export function UserAccessManagementTable() {
 		if (!user) return;
 		setEditingEmail(user.email);
 		setGrantDraft(grantsToDraft(user.grants));
-		setStatusMessage(null);
-		setErrorMessage(null);
+		setEditCompanySearch("");
 	}
 
 	function openCreateDialog() {
-		setStatusMessage(null);
-		setErrorMessage(null);
 		setCreateName("");
 		setCreateEmail("");
 		setCreateTemporaryPassword(generateTemporaryPassword());
 		setCreateGrantDraft({});
+		setCreateCompanySearch("");
 		setCreateDialogOpen(true);
 	}
 
@@ -464,6 +456,7 @@ export function UserAccessManagementTable() {
 	function renderCompanyEditor(
 		draft: Record<string, CompanyGrant>,
 		target: "single" | "bulk" | "create",
+		search: string,
 	) {
 		if (allCompanies.length === 0) {
 			return (
@@ -473,7 +466,20 @@ export function UserAccessManagementTable() {
 			);
 		}
 
-		return allCompanies.map((companyId) => {
+		const query = search.trim().toLowerCase();
+		const visibleCompanies = query
+			? allCompanies.filter((id) => id.toLowerCase().includes(query))
+			: allCompanies;
+
+		if (visibleCompanies.length === 0) {
+			return (
+				<p className="text-sm text-muted-foreground">
+					No companies match your search.
+				</p>
+			);
+		}
+
+		return visibleCompanies.map((companyId) => {
 			const grant = draft[companyId];
 			const checked = Boolean(grant);
 			return (
@@ -557,6 +563,7 @@ export function UserAccessManagementTable() {
 								size="sm"
 								onClick={() => {
 									setBulkGrantDraft({});
+									setBulkCompanySearch("");
 									setBulkDialogOpen(true);
 								}}
 								disabled={selectedUserEmails.length === 0}
@@ -578,7 +585,9 @@ export function UserAccessManagementTable() {
 									<TableHead className="w-10">
 										<Checkbox
 											checked={allFilteredSelected}
-											indeterminate={!allFilteredSelected && someFilteredSelected}
+											indeterminate={
+												!allFilteredSelected && someFilteredSelected
+											}
 											onCheckedChange={(checked) =>
 												toggleSelectAllFiltered(checked === true)
 											}
@@ -618,6 +627,8 @@ export function UserAccessManagementTable() {
 										const grants = user.grants ?? [];
 										const selected = selectedUserEmails.includes(user.email);
 										const displayName = user.name?.trim() || user.email;
+										const writeCount = grants.filter((g) => g.canWrite).length;
+										const readCount = grants.length - writeCount;
 										return (
 											<TableRow
 												key={user.username}
@@ -659,9 +670,9 @@ export function UserAccessManagementTable() {
 														<span className="text-sm text-muted-foreground">
 															None
 														</span>
-													) : (
-														<div className="flex flex-wrap gap-1.5">
-															{grants.slice(0, 2).map((grant) => (
+													) : grants.length <= 2 ? (
+														<div className="flex flex-wrap gap-1">
+															{grants.map((grant) => (
 																<Badge
 																	key={`${user.email}:${grant.companyId}`}
 																	variant={
@@ -671,11 +682,19 @@ export function UserAccessManagementTable() {
 																	{grant.companyId}
 																</Badge>
 															))}
-															{grants.length > 2 ? (
-																<Badge variant="outline">
-																	+{grants.length - 2}
-																</Badge>
-															) : null}
+														</div>
+													) : (
+														<div className="flex flex-col gap-0.5">
+															<span className="text-sm font-medium">
+																{grants.length} companies
+															</span>
+															<span className="text-xs text-muted-foreground">
+																{readCount === 0
+																	? "all write"
+																	: writeCount === 0
+																		? "read only"
+																		: `${writeCount} write, ${readCount} read`}
+															</span>
 														</div>
 													)}
 												</TableCell>
@@ -685,28 +704,36 @@ export function UserAccessManagementTable() {
 												<TableCell className="text-right">
 													<DropdownMenu>
 														<DropdownMenuTrigger
-															className={buttonVariants({ variant: "ghost", size: "icon" })}
+															className={buttonVariants({
+																variant: "ghost",
+																size: "icon",
+															})}
 															aria-label={`Actions for ${user.email}`}
 														>
-															<MoreHorizontal className="size-4" aria-hidden="true" />
+															<MoreHorizontal
+																className="size-4"
+																aria-hidden="true"
+															/>
 														</DropdownMenuTrigger>
-														<DropdownMenuContent align="end">
+														<DropdownMenuContent
+															align="end"
+															className="w-full whitespace-nowrap"
+														>
 															<DropdownMenuItem
 																onClick={() => startEdit(user.email)}
 															>
+																<Building2
+																	className="mr-2 size-4"
+																	aria-hidden="true"
+																/>
 																Edit Company Access
 															</DropdownMenuItem>
 															<DropdownMenuSeparator />
 															<DropdownMenuItem
-																className="text-destructive focus:text-destructive"
-																onClick={() => {
-																	setStatusMessage(null);
-																	setErrorMessage(null);
-																	setDeleteEmail(user.email);
-																}}
+																onClick={() => setDeleteEmail(user.email)}
 															>
 																<Trash2
-																	className="mr-2 h-4 w-4"
+																	className="mr-2 size-4"
 																	aria-hidden="true"
 																/>
 																Remove User
@@ -732,26 +759,19 @@ export function UserAccessManagementTable() {
 							set.
 						</p>
 					</div>
-
-					{statusMessage ? (
-						<Alert>
-							<AlertDescription>{statusMessage}</AlertDescription>
-						</Alert>
-					) : null}
-					{errorMessage ? (
-						<Alert variant="destructive">
-							<AlertDescription>{errorMessage}</AlertDescription>
-						</Alert>
-					) : null}
 				</CardContent>
 			</Card>
 
 			{/* Edit company access dialog */}
 			<Dialog
 				open={Boolean(editingEmail)}
-				onOpenChange={(open) =>
-					!open && (setEditingEmail(null), setGrantDraft({}))
-				}
+				onOpenChange={(open) => {
+					if (!open) {
+						setEditingEmail(null);
+						setGrantDraft({});
+						setEditCompanySearch("");
+					}
+				}}
 			>
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
@@ -760,8 +780,18 @@ export function UserAccessManagementTable() {
 							{editingUser?.email ?? "Selected user"}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-						{renderCompanyEditor(grantDraft, "single")}
+					<div className="relative">
+						<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							type="search"
+							value={editCompanySearch}
+							onChange={(e) => setEditCompanySearch(e.target.value)}
+							placeholder="Search companies..."
+							className="pl-9"
+						/>
+					</div>
+					<div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+						{renderCompanyEditor(grantDraft, "single", editCompanySearch)}
 					</div>
 					<DialogFooter>
 						<Button
@@ -779,7 +809,10 @@ export function UserAccessManagementTable() {
 							disabled={saveUserAccessMutation.isPending || !editingEmail}
 						>
 							{saveUserAccessMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Save Access
 						</Button>
@@ -792,7 +825,10 @@ export function UserAccessManagementTable() {
 				open={bulkDialogOpen}
 				onOpenChange={(open) => {
 					setBulkDialogOpen(open);
-					if (!open) setBulkGrantDraft({});
+					if (!open) {
+						setBulkGrantDraft({});
+						setBulkCompanySearch("");
+					}
 				}}
 			>
 				<DialogContent className="max-w-2xl">
@@ -804,8 +840,18 @@ export function UserAccessManagementTable() {
 							be replaced.
 						</DialogDescription>
 					</DialogHeader>
-					<div className="max-h-96 space-y-2 overflow-y-auto pr-1">
-						{renderCompanyEditor(bulkGrantDraft, "bulk")}
+					<div className="relative">
+						<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Input
+							type="search"
+							value={bulkCompanySearch}
+							onChange={(e) => setBulkCompanySearch(e.target.value)}
+							placeholder="Search companies..."
+							className="pl-9"
+						/>
+					</div>
+					<div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+						{renderCompanyEditor(bulkGrantDraft, "bulk", bulkCompanySearch)}
 					</div>
 					<DialogFooter>
 						<Button
@@ -826,7 +872,10 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{saveBulkAccessMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Apply to Selected Users
 						</Button>
@@ -899,7 +948,8 @@ export function UserAccessManagementTable() {
 								required
 							/>
 							<p className="text-sm text-muted-foreground">
-								Cognito will require a permanent password reset on first sign-in.
+								Cognito will require a permanent password reset on first
+								sign-in.
 							</p>
 						</div>
 						<div className="space-y-2">
@@ -910,8 +960,22 @@ export function UserAccessManagementTable() {
 									actions.
 								</p>
 							</div>
-							<div className="max-h-64 space-y-2 overflow-y-auto pr-1">
-								{renderCompanyEditor(createGrantDraft, "create")}
+							<div className="relative">
+								<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+								<Input
+									type="search"
+									value={createCompanySearch}
+									onChange={(e) => setCreateCompanySearch(e.target.value)}
+									placeholder="Search companies..."
+									className="pl-9"
+								/>
+							</div>
+							<div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+								{renderCompanyEditor(
+									createGrantDraft,
+									"create",
+									createCompanySearch,
+								)}
 							</div>
 						</div>
 					</div>
@@ -932,7 +996,10 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{createUserMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Create User
 						</Button>
@@ -967,7 +1034,10 @@ export function UserAccessManagementTable() {
 							disabled={deleteUserMutation.isPending || !deleteEmail}
 						>
 							{deleteUserMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Remove User
 						</AlertDialogAction>

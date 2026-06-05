@@ -14,7 +14,7 @@ import {
 	FileSpreadsheet,
 	Settings,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore, useState } from "react";
 
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -62,11 +62,11 @@ export function DashboardSidebar() {
 	const { data: session } = useSession();
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const [signingOut, setSigningOut] = useState(false);
-	const [mounted, setMounted] = useState(false);
-
-	useEffect(() => {
-		setMounted(true);
-	}, []);
+	const mounted = useSyncExternalStore(
+		() => () => {},
+		() => true,
+		() => false,
+	);
 
 	const user = session?.user;
 
@@ -160,7 +160,11 @@ export function DashboardSidebar() {
 						<>
 							<Sun className="h-4 w-4 dark:hidden" aria-hidden />
 							<Moon className="h-4 w-4 hidden dark:block" aria-hidden />
-							{theme === "system" ? "System" : theme === "dark" ? "Dark" : "Light"}
+							{theme === "system"
+								? "System"
+								: theme === "dark"
+									? "Dark"
+									: "Light"}
 						</>
 					) : (
 						<span className="h-4 w-4" />

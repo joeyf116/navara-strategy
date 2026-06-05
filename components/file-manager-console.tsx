@@ -147,6 +147,10 @@ function displayPath(segments: string[]): string {
 }
 
 export function FileManagerConsole() {
+	// useReactTable returns functions that React Compiler cannot safely memoize.
+	// "use no memo" explicitly opts this component out of compilation per React docs:
+	// https://react.dev/reference/react-compiler/directives
+	"use no memo";
 	const queryClient = useQueryClient();
 	const [currentPath, setCurrentPath] = useState<string[]>([]);
 	const [status, setStatus] = useState<{
@@ -522,6 +526,7 @@ export function FileManagerConsole() {
 		[currentPath],
 	);
 
+	// eslint-disable-next-line react-hooks/incompatible-library
 	const table = useReactTable({
 		data: rows,
 		columns,
@@ -548,14 +553,22 @@ export function FileManagerConsole() {
 					<Breadcrumb>
 						<BreadcrumbList>
 							{breadcrumbItems.map((crumb, index) => (
-								<span key={`${crumb.label}-${index}`} className="flex items-center gap-1.5">
+								<span
+									key={`${crumb.label}-${index}`}
+									className="flex items-center gap-1.5"
+								>
 									{index > 0 ? <BreadcrumbSeparator /> : null}
 									<BreadcrumbItem>
 										{index === breadcrumbItems.length - 1 ? (
 											<BreadcrumbPage>{crumb.label}</BreadcrumbPage>
 										) : (
 											<BreadcrumbLink
-												render={<button type="button" onClick={() => navigateToPath(crumb.path)} />}
+												render={
+													<button
+														type="button"
+														onClick={() => navigateToPath(crumb.path)}
+													/>
+												}
 											>
 												{crumb.label}
 											</BreadcrumbLink>
@@ -719,7 +732,10 @@ export function FileManagerConsole() {
 							disabled={!folderName.trim() || isDialogWorking}
 						>
 							{createFolderMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Create Folder
 						</Button>
@@ -804,7 +820,10 @@ export function FileManagerConsole() {
 							disabled={!uploadFile || isDialogWorking}
 						>
 							{uploadMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Upload
 						</Button>
@@ -862,7 +881,10 @@ export function FileManagerConsole() {
 							}
 						>
 							{renameMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Save
 						</Button>
@@ -900,7 +922,10 @@ export function FileManagerConsole() {
 							disabled={dialog.type !== "delete" || deleteMutation.isPending}
 						>
 							{deleteMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Loader2
+									className="mr-2 h-4 w-4 animate-spin"
+									aria-hidden="true"
+								/>
 							) : null}
 							Delete
 						</AlertDialogAction>

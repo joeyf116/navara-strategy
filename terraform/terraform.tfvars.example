@@ -15,6 +15,11 @@ github_repository       = "joeyf116/navara-strategy"
 github_branch           = "main"
 github_actions_deploy_role_name = "navara-sftp-github-actions-deploy"
 
+# Terraform state — scopes the deploy role's S3/DynamoDB permissions.
+# Must match the values passed via -backend-config (CI sets these as TF_VAR_*).
+tf_state_bucket = "your-terraform-state-bucket"
+tf_lock_table   = "your-terraform-lock-table"
+
 # Lambda Web App
 app_image_identifier    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/navara-sftp:latest"
 lambda_memory_size      = 1024
@@ -49,3 +54,31 @@ log_retention_days      = 30
 db_name           = "excel_db"
 db_username       = "db_admin"
 db_instance_class = "db.t3.micro"
+
+# RDS safety (production defaults shown). Enabling backups on an existing
+# 0-day instance applies during the next maintenance window (brief outage).
+db_backup_retention_period = 7
+db_deletion_protection     = true
+db_skip_final_snapshot     = false
+
+# Restrict external ODBC access to known IPs as soon as they are available.
+# db_public_cidr_blocks = ["203.0.113.10/32"]
+
+# Tagging / cost allocation
+owner       = "team@your-domain.com"
+cost_center = ""
+
+# Networking — false (default) skips the NAT Gateway (~$33/mo saved);
+# set true to restore private-subnet + NAT Lambda networking.
+enable_lambda_vpc = false
+
+# S3 lifecycle — days to keep overwritten/deleted object versions recoverable
+s3_noncurrent_version_expiration_days = 30
+
+# AWS Budgets
+monthly_budget_limit = 300
+budget_currency      = "USD"
+budget_alert_emails  = ["team@your-domain.com"]
+enable_budget_alerts = true
+# Optional per-environment budget (requires Environment cost-allocation tag activated)
+# environment_budget_limit = 250

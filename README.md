@@ -25,11 +25,12 @@ flowchart LR
 
 ### Runtime model
 
-- **UI shell:** App Router dashboard at `/files`, `/uploads`, and `/settings`.
+- **UI shell:** App Router portal with a role-aware dashboard at `/`, plus `/files`, `/uploads`, and `/settings`.
 - **Files workspace (`/files`):** virtual file tree backed by S3 prefixes with per-company access controls.
 - **Import workflow (`/uploads`):** uploads `.xlsx/.xls` directly to S3 using presigned URLs, then tracks ingestion jobs in PostgreSQL.
-- **Settings (`/settings`):** WebDAV/SFTP/database connection details, app-password management, and super-admin company/user access tools.
-- **Legacy share hub (`/upload`):** authenticated shared-file upload/list screen backed by `/api/files`.
+- **Settings (`/settings`):** WebDAV/SFTP connection setup, app-password management, and database connection details (super admin).
+- **User access (`/users`, super admin only):** Cognito user management and company-level access grants. Server-side route guard; non-admins get an access-denied state.
+- **Legacy share hub (`/upload`):** removed — the route now redirects to `/files`. The `/api/files` endpoints remain available.
 
 ## Storage and access model
 
@@ -64,7 +65,17 @@ Roles:
 - `tenant_user`
 - `read_only_auditor`
 
-In production, roles are derived from Cognito groups. In local/dev mode, a credentials provider with demo users is enabled.
+In production, roles are derived from Cognito groups (see `roleFromCognitoProfile` in `lib/auth.ts`; unmapped users default to `tenant_user`). In local/dev mode, a credentials provider with demo users is enabled — the login page offers one-click sign-in per role.
+
+Permission checks are centralized in `lib/rbac.ts`:
+
+- `rolePermissions` — feature grants per role (`super_admin` has `"*"`)
+- `canAccessFeature(role, feature)` — used by the sidebar and dashboard to filter navigation and widgets
+- `hasRole` / `hasAnyRole` / `isAdminRole` — direct role checks
+
+UI gating is convenience only; **enforcement happens server-side** in the API route handlers (e.g. `requireSuperAdmin` in `app/api/settings/company-access/*`, role checks in `app/api/files/*`). To add a feature: add its key to the `Feature` union and the relevant roles in `rolePermissions`, gate the UI with `canAccessFeature`, and enforce the same rule in the API route.
+
+The dashboard (`/`) is a role-aware overview containing previews and summaries only — full data lives on its canonical page (files on `/files`, imports on `/uploads`, connection setup on `/settings`, user management on `/users`). All roles see a recent-files preview and their own company-access summary; `super_admin` additionally sees a user/company-access summary linking to `/users`. Admin-only widgets call super-admin-only APIs, which reject other roles regardless of what the client renders.
 
 ## API surface (high level)
 
@@ -128,6 +139,7 @@ npm run dev
 
 App URLs:
 
+- `http://localhost:3000/` (role-aware dashboard)
 - `http://localhost:3000/files`
 - `http://localhost:3000/uploads`
 - `http://localhost:3000/settings`
@@ -143,12 +155,34 @@ npm run build
 
 ## CI/CD
 
-- **PRs to `main`:** `.github/workflows/ci.yml` runs lint, type-check (`npx tsc --noEmit`), and build.
-- **Pushes to `main`:** `.github/workflows/deploy.yml` runs CI gate, builds/pushes Docker image, then runs Terraform apply.
+**Deployment is manual-only.** Nothing deploys on push, pull request, or merge.
+
+- **PRs and pushes to `main`:** `.github/workflows/ci.yml` runs lint, type-check (`npx tsc --noEmit`), build, `terraform fmt -check`, and `terraform validate`. It uses no AWS credentials and cannot deploy.
+- **Deployment:** `.github/workflows/deploy.yml` runs only via **workflow_dispatch**.
+
+### How to deploy
+
+1. GitHub → **Actions** → **Manual Deploy** → **Run workflow**.
+2. Choose:
+   - **Environment** — `production` (extend the choice list as more environments are added)
+   - **Action** — `plan` (preview only, uploads the plan as an artifact, applies nothing) or `apply`
+   - **Build & push image** — build the Docker image from the selected ref (default on)
+   - **Run Terraform** — plan/apply infrastructure (default on)
+3. Review the job summary (deployment selection + tail of the Terraform plan). With `action = plan`, stop here; re-run with `apply` when satisfied.
+
+Combinations worth knowing:
+
+- **Frontend-only release:** image build on, Terraform off, action `apply` — the workflow pushes the image and updates the Lambda directly via `aws lambda update-function-code`.
+- **Infra-only change:** image build off, Terraform on — the workflow reuses the currently deployed image URI (read from the Lambda) so Terraform doesn't roll the function.
+- **Plan-only dry run:** action `plan` with either toggle.
+
+### Production approval gate (recommended)
+
+Create a GitHub **Environment** named `production` (Settings → Environments) and add **Required reviewers**. The deploy jobs run with `environment: production`, so AWS credentials are only issued after a reviewer approves the run. Store `AWS_DEPLOY_ROLE_ARN` as an environment secret there.
 
 ### Required GitHub secret
 
-- `AWS_DEPLOY_ROLE_ARN`
+- `AWS_DEPLOY_ROLE_ARN` (OIDC role; no static AWS keys are used). The role is least-privilege — see `terraform/README.md` ("Deploy role") for its scope and the `tf_state_bucket`/`tf_lock_table` variables that must match `TF_STATE_BUCKET`/`TF_LOCK_TABLE`.
 
 ### Required GitHub variables
 

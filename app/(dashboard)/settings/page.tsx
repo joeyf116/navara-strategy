@@ -2,11 +2,22 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, Copy } from "lucide-react";
+import {
+	Apple,
+	Database,
+	HardDrive,
+	KeyRound,
+	Monitor,
+	Server,
+	Terminal,
+} from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
-import { UserAccessManagementTable } from "@/components/user-access-management-table";
+import { AppPasswordsPanel } from "@/components/features/settings/app-passwords-panel";
+import { CopyField } from "@/components/shared/copy-field";
+import { ErrorState } from "@/components/shared/error-state";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -15,9 +26,8 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type ConnectionInfo = {
@@ -56,56 +66,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return payload;
 }
 
-function CopyField({
-	label,
-	value,
-	placeholder = "Loading...",
-}: {
-	label: string;
-	value: string;
-	placeholder?: string;
-}) {
-	const [copied, setCopied] = useState(false);
-
-	function copy() {
-		if (!value) return;
-		void navigator.clipboard.writeText(value);
-		setCopied(true);
-		setTimeout(() => setCopied(false), 1500);
-	}
-
-	return (
-		<div className="space-y-1.5">
-			<Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				{label}
-			</Label>
-			<div className="flex gap-2">
-				<Input
-					readOnly
-					value={value}
-					placeholder={placeholder}
-					className="font-mono text-sm"
-				/>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={copy}
-					disabled={!value}
-					aria-label={`Copy ${label}`}
-				>
-					{copied ? (
-						<Check className="h-4 w-4 text-success" />
-					) : (
-						<Copy className="h-4 w-4" />
-					)}
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 export default function SettingsPage() {
-	const { data: connection = null } = useQuery<ConnectionInfo>({
+	const {
+		data: connection = null,
+		isLoading,
+		isError,
+		refetch,
+	} = useQuery<ConnectionInfo>({
 		queryKey: ["connection-info"],
 		queryFn: () => requestJson<ConnectionInfo>("/api/settings/connection-info"),
 	});
@@ -136,163 +103,400 @@ export default function SettingsPage() {
 	});
 
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-8">
 			<PageHeader
 				title="Settings"
-				description="Connection details and user access controls."
+				description="Set up your network drive, SFTP connection, and app passwords."
 			/>
 
-			{connection?.isSuperAdmin ? <UserAccessManagementTable /> : null}
-
+			{/* ── Network Drive Setup ────────────────────────────────────────── */}
 			<Card>
-				<CardHeader>
-					<CardTitle>Connection Setup</CardTitle>
-					<CardDescription>
-						Use WebDAV for native mounts, SFTP for file clients, and database
-						settings for admin SQL access.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4">
-					<Tabs defaultValue="webdav">
-						<TabsList>
-							<TabsTrigger value="webdav">WebDAV</TabsTrigger>
-							<TabsTrigger value="sftp">SFTP</TabsTrigger>
-							{connection?.isSuperAdmin ? (
-								<TabsTrigger value="database">Database</TabsTrigger>
-							) : null}
-						</TabsList>
-						<TabsContent value="webdav" className="space-y-3 pt-4">
-							<CopyField
-								label="WebDAV URL"
-								value={connection?.webdavUrl ?? ""}
-							/>
-							<p className="text-sm text-muted-foreground">
-								Map this URL as a network drive in Windows File Explorer or
-								connect in macOS Finder with Connect to Server.
-							</p>
-						</TabsContent>
-						<TabsContent value="sftp" className="space-y-3 pt-4">
-							<div className="grid gap-3 sm:grid-cols-2">
-								<CopyField label="Host" value={connection?.sftpEndpoint ?? ""} />
-								<CopyField label="Port" value="22" />
-								<CopyField
-									label="Username"
-									value={connection?.userEmail ?? ""}
-								/>
-								<CopyField label="Password" value="Use your portal password" />
-							</div>
-							{connection?.sftpEndpoint && connection?.userEmail ? (
-								<CopyField
-									label="Terminal Command"
-									value={`sftp -P 22 ${connection.userEmail}@${connection.sftpEndpoint}`}
-								/>
-							) : null}
-						</TabsContent>
-						{connection?.isSuperAdmin ? (
-							<TabsContent value="database" className="space-y-4 pt-4">
-								{connection.database ? (
-									<>
-										<div className="grid gap-3 sm:grid-cols-2">
-											<CopyField
-												label="Host"
-												value={connection.database.host}
-											/>
-											<CopyField
-												label="Port"
-												value={connection.database.port}
-											/>
-											<CopyField
-												label="Database"
-												value={connection.database.database}
-											/>
-											<CopyField
-												label="Username"
-												value={connection.database.username}
-											/>
-											<CopyField
-												label="Password"
-												value={connection.database.password}
-											/>
-											<CopyField
-												label="SSL Mode"
-												value={connection.database.sslMode}
-											/>
-										</div>
-
-										<CopyField
-											label="Connection String"
-											value={connection.database.connectionString}
-										/>
-										<CopyField
-											label="PSQL Command"
-											value={`psql "${connection.database.connectionString}"`}
-										/>
-
-										<div className="flex flex-wrap items-center gap-3">
-											<Button
-												variant="outline"
-												onClick={() => {
-													setDbStatus(null);
-													void verifyDatabaseMutation.mutateAsync();
-												}}
-												disabled={verifyDatabaseMutation.isPending}
-											>
-												{verifyDatabaseMutation.isPending
-													? "Verifying..."
-													: "Verify database connection"}
-											</Button>
-											<p className="text-sm text-muted-foreground">
-												Verifies real connectivity using the server-side
-												DATABASE_URL.
-											</p>
-										</div>
-
-										{dbStatus ? (
-											<Alert
-												variant={dbStatus.error ? "destructive" : "default"}
-											>
-												<AlertDescription>{dbStatus.message}</AlertDescription>
-											</Alert>
-										) : null}
-									</>
-								) : (
-									<p className="text-sm text-muted-foreground">
-										DATABASE_URL is not configured in the application runtime.
-									</p>
-								)}
-							</TabsContent>
-						) : null}
-					</Tabs>
-
-					<Separator />
-
-					<div className="space-y-2 text-sm text-muted-foreground">
-						<p className="font-medium text-foreground">Client shortcuts</p>
-						<p>
-							FileZilla / WinSCP / Cyberduck: use SFTP, host + port 22, username
-							= portal email.
-						</p>
-						<p>
-							For persistent drive mapping on Windows, install{" "}
-							<a
-								href="https://github.com/winfsp/sshfs-win#installation"
-								target="_blank"
-								rel="noopener noreferrer"
-								className="underline underline-offset-4 hover:text-foreground"
-							>
-								SSHFS-Win
-							</a>
-							.
-						</p>
+				<CardHeader className="border-b border-border pb-4">
+					<div className="flex items-center gap-3">
+						<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+							<HardDrive className="h-5 w-5 text-primary" aria-hidden="true" />
+						</div>
+						<div>
+							<CardTitle>Network Drive (WebDAV)</CardTitle>
+							<CardDescription>
+								Map your company files as a local drive on Windows, macOS, or
+								Linux.
+							</CardDescription>
+						</div>
 					</div>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-6 pt-6">
+					{isError ? (
+						<ErrorState
+							title="Unable to load connection details"
+							description="Something went wrong while loading your connection details. Try again."
+							onRetry={() => void refetch()}
+						/>
+					) : (
+						<>
+							{/* Step 1 – App password */}
+							<section className="flex flex-col gap-3">
+								<div className="flex items-center gap-2">
+									<div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+										1
+									</div>
+									<h3 className="text-sm font-semibold">
+										Create an app password
+									</h3>
+									<Badge variant="outline" className="ml-auto text-xs">
+										<KeyRound className="mr-1 h-3 w-3" aria-hidden="true" />
+										Required for drive mapping
+									</Badge>
+								</div>
+								<p className="pl-8 text-sm text-muted-foreground">
+									App passwords let your OS authenticate over WebDAV without
+									using your main login. Create one per device.
+								</p>
+								<div className="pl-8">
+									<AppPasswordsPanel />
+								</div>
+							</section>
 
-					{connection?.companies?.length ? (
-						<p className="text-xs text-muted-foreground">
-							Accessible companies: {connection.companies.join(", ")}
-						</p>
-					) : null}
+							<Separator />
+
+							{/* Step 2 – WebDAV URL + per-OS instructions */}
+							<section className="flex flex-col gap-3">
+								<div className="flex items-center gap-2">
+									<div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+										2
+									</div>
+									<h3 className="text-sm font-semibold">
+										Map your network drive
+									</h3>
+								</div>
+								<div className="pl-8">
+									<CopyField
+										label="WebDAV URL"
+										value={connection?.webdavUrl ?? ""}
+										loading={isLoading}
+									/>
+								</div>
+
+								<div className="pl-8">
+									<Tabs defaultValue="windows">
+										<TabsList>
+											<TabsTrigger value="windows">
+												<Monitor
+													className="mr-1.5 h-3.5 w-3.5"
+													aria-hidden="true"
+												/>
+												Windows
+											</TabsTrigger>
+											<TabsTrigger value="macos">
+												<Apple
+													className="mr-1.5 h-3.5 w-3.5"
+													aria-hidden="true"
+												/>
+												macOS
+											</TabsTrigger>
+											<TabsTrigger value="linux">
+												<Terminal
+													className="mr-1.5 h-3.5 w-3.5"
+													aria-hidden="true"
+												/>
+												Linux
+											</TabsTrigger>
+										</TabsList>
+
+										{/* Windows */}
+										<TabsContent
+											value="windows"
+											className="mt-4 flex flex-col gap-3"
+										>
+											<ol className="space-y-2 text-sm text-muted-foreground">
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														1
+													</span>
+													Open{" "}
+													<strong className="text-foreground">
+														File Explorer
+													</strong>
+													, right-click{" "}
+													<strong className="text-foreground">This PC</strong>,
+													and choose{" "}
+													<strong className="text-foreground">
+														Map network drive…
+													</strong>
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														2
+													</span>
+													Choose a drive letter, paste the WebDAV URL above into{" "}
+													<strong className="text-foreground">Folder</strong>,
+													and tick{" "}
+													<strong className="text-foreground">
+														Reconnect at sign-in
+													</strong>
+													.
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														3
+													</span>
+													When prompted, enter your email as the{" "}
+													<strong className="text-foreground">username</strong>{" "}
+													and the app password you created above.
+												</li>
+											</ol>
+											<p className="text-xs text-muted-foreground">
+												<strong>Tip:</strong> If the drive mapping wizard is
+												greyed out, ensure the <em>WebClient</em> Windows
+												service is running (
+												<code className="rounded bg-muted px-1 text-xs">
+													services.msc
+												</code>{" "}
+												→ WebClient → Start).
+											</p>
+										</TabsContent>
+
+										{/* macOS */}
+										<TabsContent
+											value="macos"
+											className="mt-4 flex flex-col gap-3"
+										>
+											<ol className="space-y-2 text-sm text-muted-foreground">
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														1
+													</span>
+													In Finder press{" "}
+													<kbd className="rounded border px-1 font-mono text-xs">
+														⌘ K
+													</kbd>{" "}
+													to open{" "}
+													<strong className="text-foreground">
+														Connect to Server
+													</strong>
+													.
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														2
+													</span>
+													Paste the WebDAV URL into the{" "}
+													<strong className="text-foreground">
+														Server Address
+													</strong>{" "}
+													field and click{" "}
+													<strong className="text-foreground">Connect</strong>.
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														3
+													</span>
+													Enter your email and the app password when prompted.
+												</li>
+											</ol>
+										</TabsContent>
+
+										{/* Linux */}
+										<TabsContent
+											value="linux"
+											className="mt-4 flex flex-col gap-3"
+										>
+											<p className="text-sm text-muted-foreground">
+												Mount using{" "}
+												<code className="rounded bg-muted px-1 text-xs">
+													davfs2
+												</code>{" "}
+												or a file manager like Nautilus / Dolphin:
+											</p>
+											<ol className="space-y-2 text-sm text-muted-foreground">
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														1
+													</span>
+													Install{" "}
+													<code className="rounded bg-muted px-1 text-xs">
+														davfs2
+													</code>
+													:{" "}
+													<code className="rounded bg-muted px-1 text-xs">
+														sudo apt install davfs2
+													</code>
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														2
+													</span>
+													<span>
+														Mount:
+														<br />
+														<code className="mt-1 block rounded bg-muted px-2 py-1 text-xs">
+															{`sudo mount -t davfs ${connection?.webdavUrl ?? "<WebDAV URL>"} /mnt/navara`}
+														</code>
+													</span>
+												</li>
+												<li className="flex gap-2">
+													<span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-xs font-medium text-foreground">
+														3
+													</span>
+													Enter your email and the app password when prompted.
+												</li>
+											</ol>
+										</TabsContent>
+									</Tabs>
+								</div>
+							</section>
+
+						</>
+					)}
 				</CardContent>
 			</Card>
+
+			{/* ── SFTP ──────────────────────────────────────────────────────────── */}
+			<Card>
+				<CardHeader className="border-b border-border pb-4">
+					<div className="flex items-center gap-3">
+						<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+							<Server
+								className="h-5 w-5 text-muted-foreground"
+								aria-hidden="true"
+							/>
+						</div>
+						<div>
+							<CardTitle>SFTP</CardTitle>
+							<CardDescription>
+								Connect with FileZilla, WinSCP, Cyberduck, or any SFTP client.
+							</CardDescription>
+						</div>
+					</div>
+				</CardHeader>
+				<CardContent className="flex flex-col gap-4 pt-6">
+					<div className="grid gap-3 sm:grid-cols-2">
+						<CopyField
+							label="Host"
+							value={connection?.sftpEndpoint ?? ""}
+							loading={isLoading}
+						/>
+						<CopyField label="Port" value="22" loading={isLoading} />
+						<CopyField
+							label="Username"
+							value={connection?.userEmail ?? ""}
+							loading={isLoading}
+						/>
+						<CopyField
+							label="Password"
+							value="Use your portal password"
+							loading={isLoading}
+						/>
+					</div>
+					{connection?.sftpEndpoint && connection?.userEmail ? (
+						<CopyField
+							label="Terminal command"
+							value={`sftp -P 22 ${connection.userEmail}@${connection.sftpEndpoint}`}
+						/>
+					) : null}
+					<p className="text-sm text-muted-foreground">
+						For SFTP file-manager support on Windows, install{" "}
+						<a
+							href="https://github.com/winfsp/sshfs-win#installation"
+							target="_blank"
+							rel="noopener noreferrer"
+							className="underline underline-offset-4 hover:text-foreground"
+						>
+							SSHFS-Win
+						</a>
+						.
+					</p>
+				</CardContent>
+			</Card>
+
+			{/* ── Database Access (super admin) ─────────────────────────────────── */}
+			{connection?.isSuperAdmin ? (
+				<Card>
+					<CardHeader className="border-b border-border pb-4">
+						<div className="flex items-center gap-3">
+							<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+								<Database
+									className="h-5 w-5 text-muted-foreground"
+									aria-hidden="true"
+								/>
+							</div>
+							<div>
+								<CardTitle>Database Access</CardTitle>
+								<CardDescription>
+									Direct PostgreSQL credentials for administrators.
+								</CardDescription>
+							</div>
+						</div>
+					</CardHeader>
+					<CardContent className="flex flex-col gap-4 pt-6">
+						{connection.database ? (
+							<>
+								<div className="grid gap-3 sm:grid-cols-2">
+									<CopyField label="Host" value={connection.database.host} />
+									<CopyField label="Port" value={connection.database.port} />
+									<CopyField
+										label="Database"
+										value={connection.database.database}
+									/>
+									<CopyField
+										label="Username"
+										value={connection.database.username}
+									/>
+									<CopyField
+										label="Password"
+										value={connection.database.password}
+									/>
+									<CopyField
+										label="SSL Mode"
+										value={connection.database.sslMode}
+									/>
+								</div>
+
+								<CopyField
+									label="Connection string"
+									value={connection.database.connectionString}
+								/>
+								<CopyField
+									label="psql command"
+									value={`psql "${connection.database.connectionString}"`}
+								/>
+
+								<div className="flex flex-wrap items-center gap-3">
+									<Button
+										variant="outline"
+										onClick={() => {
+											setDbStatus(null);
+											void verifyDatabaseMutation.mutateAsync();
+										}}
+										disabled={verifyDatabaseMutation.isPending}
+									>
+										{verifyDatabaseMutation.isPending ? (
+											<Spinner data-icon="inline-start" aria-hidden="true" />
+										) : null}
+										{verifyDatabaseMutation.isPending
+											? "Verifying…"
+											: "Verify database connection"}
+									</Button>
+									<p className="text-sm text-muted-foreground">
+										Runs a live connectivity check from the server.
+									</p>
+								</div>
+
+								{dbStatus ? (
+									<Alert variant={dbStatus.error ? "destructive" : "default"}>
+										<AlertDescription>{dbStatus.message}</AlertDescription>
+									</Alert>
+								) : null}
+							</>
+						) : (
+							<p className="text-sm text-muted-foreground">
+								Database access is not configured for this environment.
+							</p>
+						)}
+					</CardContent>
+				</Card>
+			) : null}
+
 		</div>
 	);
 }

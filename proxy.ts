@@ -10,13 +10,21 @@ export async function proxy(req: NextRequest) {
 		return NextResponse.next();
 	}
 
+	// skipTrailingSlashRedirect is enabled for WebDAV, so normalize trailing
+	// slashes for everything else here.
+	if (pathname.length > 1 && pathname.endsWith("/")) {
+		const url = req.nextUrl.clone();
+		url.pathname = pathname.replace(/\/+$/, "");
+		return NextResponse.redirect(url, 308);
+	}
+
 	const session = await auth();
 	const isLoggedIn = !!session?.user;
 
 	// Redirect authenticated users away from login
 	if (pathname === "/login") {
 		if (isLoggedIn) {
-			return NextResponse.redirect(new URL("/uploads", req.nextUrl));
+			return NextResponse.redirect(new URL("/files", req.nextUrl));
 		}
 		return NextResponse.next();
 	}

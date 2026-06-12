@@ -9,7 +9,7 @@ export default async function LoginPage({
 }) {
 	const session = await auth();
 	if (session?.user) {
-		redirect("/uploads");
+		redirect("/files");
 	}
 
 	const { callbackUrl, error } = await searchParams;
@@ -26,7 +26,7 @@ export default async function LoginPage({
 		<LoginForm
 			isDev={isDev}
 			hasCognito={hasCognito}
-			callbackUrl={callbackUrl ?? "/uploads"}
+			callbackUrl={callbackUrl ?? "/files"}
 			authError={error}
 		/>
 	);

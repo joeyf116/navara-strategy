@@ -4,8 +4,13 @@ output "app_url" {
 }
 
 output "webdav_endpoint" {
+  value       = var.webdav_url != "" ? var.webdav_url : "${trimsuffix(var.app_public_url, "/")}/api/dav"
+  description = "WebDAV endpoint for mapping network drives (CloudFront path by default; Lambda@Edge tunnels the WebDAV verbs). Matches the app's runtime fallback."
+}
+
+output "webdav_cloudfront_endpoint" {
   value       = "https://${aws_cloudfront_distribution.web.domain_name}/api/dav"
-  description = "WebDAV endpoint for mapping network drives"
+  description = "WebDAV endpoint via CloudFront (requires Lambda@Edge to be deployed first for full PROPFIND support)"
 }
 
 output "lambda_url" {
@@ -96,6 +101,16 @@ output "rds_database" {
 output "rds_username" {
   value       = aws_db_instance.excel.username
   description = "PostgreSQL master username"
+}
+
+output "account_budget_name" {
+  value       = module.account_budget.budget_name
+  description = "Name of the account-level monthly AWS Budget"
+}
+
+output "environment_budget_name" {
+  value       = length(module.environment_budget) > 0 ? module.environment_budget[0].budget_name : null
+  description = "Name of the environment-scoped monthly AWS Budget (null when disabled)"
 }
 
 output "rds_connection_string" {

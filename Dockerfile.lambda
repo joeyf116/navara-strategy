@@ -34,5 +34,10 @@ COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
+# WebDAV verb-tunnel gateway: LWA -> gateway (3000) -> Next server (3001).
+# Required because Next.js cannot route PROPFIND/LOCK/etc. directly.
+COPY --from=builder /app/dav-gateway.mjs ./
+ENV DAV_UPSTREAM_PORT=3001
+
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "dav-gateway.mjs"]

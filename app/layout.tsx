@@ -9,9 +9,12 @@ import { cn } from "@/lib/utils";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-	title: "Navara Insights Portal",
+	title: {
+		default: "Navara Portal",
+		template: "%s · Navara Portal",
+	},
 	description:
-		"Operational insights, platform health monitoring, and administrative management",
+		"Secure file exchange, Excel data imports, and account administration for Navara clients.",
 	icons: {
 		icon: "/icon.svg",
 		shortcut: "/icon.svg",

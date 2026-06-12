@@ -1,27 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-	ColumnDef,
-	flexRender,
-	getCoreRowModel,
-	useReactTable,
-} from "@tanstack/react-table";
 import {
 	ChevronRight,
 	File,
 	Folder,
-	Loader2,
+	FolderOpen,
 	MoreHorizontal,
 	Plus,
 	RefreshCw,
 	Upload,
 } from "lucide-react";
-
-import { CreateCompanyDialog } from "@/components/create-company-dialog";
-import { PageHeader } from "@/components/common/page-header";
 import { toast } from "sonner";
+
+import { CreateCompanyDialog } from "@/components/features/files/create-company-dialog";
+import { PageHeader } from "@/components/common/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
+import { TableSkeletonRows } from "@/components/shared/table-skeleton";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -53,12 +50,19 @@ import {
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+	Progress,
+	ProgressLabel,
+	ProgressValue,
+} from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import {
 	Table,
 	TableBody,
@@ -83,24 +87,6 @@ type ConnectionInfo = {
 	isSuperAdmin: boolean;
 };
 
-type RowData =
-	| {
-			kind: "go-back";
-			id: string;
-			name: string;
-			sizeBytes: number;
-			updatedAt: string;
-			entry: null;
-	  }
-	| {
-			kind: "entry";
-			id: string;
-			name: string;
-			sizeBytes: number;
-			updatedAt: string;
-			entry: Entry;
-	  };
-
 type DialogState =
 	| { type: "closed" }
 	| { type: "newFolder" }
@@ -111,7 +97,7 @@ type DialogState =
 const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 
 function formatSize(bytes: number) {
-	if (bytes === 0) return "-";
+	if (bytes === 0) return "—";
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	if (bytes < 1024 * 1024 * 1024)
@@ -120,9 +106,9 @@ function formatSize(bytes: number) {
 }
 
 function formatModified(value: string) {
-	if (!value) return "-";
+	if (!value) return "—";
 	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return "-";
+	if (Number.isNaN(date.getTime())) return "—";
 	return new Intl.DateTimeFormat(undefined, {
 		month: "short",
 		day: "numeric",
@@ -147,10 +133,6 @@ function displayPath(segments: string[]): string {
 }
 
 export function FileManagerConsole() {
-	// useReactTable returns functions that React Compiler cannot safely memoize.
-	// "use no memo" explicitly opts this component out of compilation per React docs:
-	// https://react.dev/reference/react-compiler/directives
-	"use no memo";
 	const queryClient = useQueryClient();
 	const [currentPath, setCurrentPath] = useState<string[]>([]);
 	const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -171,8 +153,10 @@ export function FileManagerConsole() {
 
 	const {
 		data: entries = [],
-		isFetching,
+		isLoading,
+		isRefetching,
 		error: loadError,
+		refetch,
 	} = useQuery<Entry[]>({
 		queryKey: ["files-tree", currentPathString],
 		queryFn: async () => {
@@ -189,16 +173,6 @@ export function FileManagerConsole() {
 		},
 	});
 
-	useEffect(() => {
-		if (loadError) {
-			toast.error(
-				loadError instanceof Error
-					? loadError.message
-					: "Failed to load files.",
-			);
-		}
-	}, [loadError]);
-
 	const { data: connection = null } = useQuery<ConnectionInfo>({
 		queryKey: ["connection-info"],
 		queryFn: async () => {
@@ -210,14 +184,6 @@ export function FileManagerConsole() {
 				throw new Error(payload.error ?? "Failed to load connection info.");
 			}
 			return payload;
-		},
-	});
-
-	const refreshMutation = useMutation({
-		mutationFn: async () => {
-			await queryClient.invalidateQueries({
-				queryKey: ["files-tree", currentPathString],
-			});
 		},
 	});
 
@@ -357,121 +323,52 @@ export function FileManagerConsole() {
 		return items;
 	}, [currentPath]);
 
-	const rows = useMemo<RowData[]>(() => {
-		const data: RowData[] = entries.map((entry) => ({
-			kind: "entry",
-			id: entry.id,
-			name: entry.name,
-			sizeBytes: entry.sizeBytes,
-			updatedAt: entry.updatedAt,
-			entry,
-		}));
-		if (currentPath.length > 0) {
-			data.unshift({
-				kind: "go-back",
-				id: "go-back",
-				name: ".. / Go Back",
-				sizeBytes: 0,
-				updatedAt: "",
-				entry: null,
-			});
-		}
-		return data;
-	}, [entries, currentPath.length]);
-
 	function navigateToPath(path: string[]) {
 		setCurrentPath(path);
 	}
 
-	const columns = useMemo<ColumnDef<RowData>[]>(
-		() => [
-			{
-				accessorKey: "name",
-				header: "Name",
-				cell: ({ row }) => {
-					const item = row.original;
-					if (item.kind === "go-back") {
-						return (
-							<button
-								type="button"
-								onClick={() => navigateToPath(currentPath.slice(0, -1))}
-								className="flex items-center gap-2 font-medium text-muted-foreground hover:text-foreground"
-							>
-								<ChevronRight
-									className="h-4 w-4 rotate-180"
-									aria-hidden="true"
-								/>
-								<span>{item.name}</span>
-							</button>
-						);
-					}
-
-					const entry = item.entry;
-					if (!entry) return null;
-
-					return (
+	function renderEntryRow(entry: Entry) {
+		return (
+			<TableRow key={entry.id}>
+				<TableCell>
+					{entry.kind === "folder" ? (
 						<button
 							type="button"
 							className="flex min-w-0 items-center gap-2 text-left font-medium hover:underline"
-							onClick={() => {
-								if (entry.kind === "folder") {
-									navigateToPath([...currentPath, entry.name]);
-								}
-							}}
-							disabled={entry.kind !== "folder"}
+							onClick={() => navigateToPath([...currentPath, entry.name])}
 						>
-							{entry.kind === "folder" ? (
-								<Folder
-									className="h-4 w-4 shrink-0 text-amber-500"
-									aria-hidden="true"
-								/>
-							) : (
-								<File
-									className="h-4 w-4 shrink-0 text-muted-foreground"
-									aria-hidden="true"
-								/>
-							)}
+							<Folder
+								className="size-4 shrink-0 text-muted-foreground"
+								aria-hidden="true"
+							/>
 							<span className="truncate">{entry.name}</span>
 						</button>
-					);
-				},
-			},
-			{
-				accessorKey: "sizeBytes",
-				header: "Size",
-				cell: ({ row }) => {
-					const item = row.original;
-					if (item.kind === "go-back") return "-";
-					if (item.entry?.kind === "folder") return "-";
-					return formatSize(item.sizeBytes);
-				},
-			},
-			{
-				accessorKey: "updatedAt",
-				header: "Last Modified",
-				cell: ({ row }) => {
-					const item = row.original;
-					if (item.kind === "go-back") return "-";
-					return formatModified(item.updatedAt);
-				},
-			},
-			{
-				id: "actions",
-				header: () => <span className="sr-only">Actions</span>,
-				cell: ({ row }) => {
-					const item = row.original;
-					if (item.kind === "go-back") return null;
-					const entry = item.entry;
-					if (!entry) return null;
-					return (
-						<DropdownMenu>
-							<DropdownMenuTrigger
-								className={buttonVariants({ variant: "ghost", size: "icon" })}
-								aria-label={`Actions for ${entry.name}`}
-							>
-								<MoreHorizontal className="size-4" aria-hidden="true" />
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
+					) : (
+						<span className="flex min-w-0 items-center gap-2 font-medium">
+							<File
+								className="size-4 shrink-0 text-muted-foreground"
+								aria-hidden="true"
+							/>
+							<span className="truncate">{entry.name}</span>
+						</span>
+					)}
+				</TableCell>
+				<TableCell className="text-muted-foreground">
+					{entry.kind === "folder" ? "—" : formatSize(entry.sizeBytes)}
+				</TableCell>
+				<TableCell className="text-muted-foreground">
+					{formatModified(entry.updatedAt)}
+				</TableCell>
+				<TableCell className="text-right">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							className={buttonVariants({ variant: "ghost", size: "icon" })}
+							aria-label={`Actions for ${entry.name}`}
+						>
+							<MoreHorizontal className="size-4" aria-hidden="true" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuGroup>
 								{entry.kind === "file" ? (
 									<DropdownMenuItem
 										onClick={() => {
@@ -481,7 +378,6 @@ export function FileManagerConsole() {
 										Download
 									</DropdownMenuItem>
 								) : null}
-								{entry.kind === "file" ? <DropdownMenuSeparator /> : null}
 								<DropdownMenuItem
 									onClick={() => {
 										setRenameName(entry.name);
@@ -491,7 +387,9 @@ export function FileManagerConsole() {
 								>
 									Rename
 								</DropdownMenuItem>
-								<DropdownMenuSeparator />
+							</DropdownMenuGroup>
+							<DropdownMenuSeparator />
+							<DropdownMenuGroup>
 								<DropdownMenuItem
 									className="text-destructive focus:text-destructive"
 									onClick={() => setDialog({ type: "delete", entry })}
@@ -499,46 +397,120 @@ export function FileManagerConsole() {
 								>
 									Delete
 								</DropdownMenuItem>
-							</DropdownMenuContent>
-						</DropdownMenu>
-					);
-				},
-			},
-		],
-		[currentPath],
-	);
+							</DropdownMenuGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				</TableCell>
+			</TableRow>
+		);
+	}
 
-	// eslint-disable-next-line react-hooks/incompatible-library
-	const table = useReactTable({
-		data: rows,
-		columns,
-		getCoreRowModel: getCoreRowModel(),
-	});
+	function renderTableBody() {
+		if (isLoading) {
+			return <TableSkeletonRows rows={6} columns={4} />;
+		}
+
+		if (loadError) {
+			return (
+				<TableRow>
+					<TableCell colSpan={4} className="p-4">
+						<ErrorState
+							title="Unable to load files"
+							description="Something went wrong while loading this folder. Try again."
+							onRetry={() => void refetch()}
+						/>
+					</TableCell>
+				</TableRow>
+			);
+		}
+
+		const goBackRow =
+			currentPath.length > 0 ? (
+				<TableRow key="go-back">
+					<TableCell colSpan={4}>
+						<button
+							type="button"
+							onClick={() => navigateToPath(currentPath.slice(0, -1))}
+							className="flex items-center gap-2 font-medium text-muted-foreground hover:text-foreground"
+						>
+							<ChevronRight className="size-4 rotate-180" aria-hidden="true" />
+							<span>Up one level</span>
+						</button>
+					</TableCell>
+				</TableRow>
+			) : null;
+
+		if (entries.length === 0) {
+			return (
+				<>
+					{goBackRow}
+					<TableRow>
+						<TableCell colSpan={4}>
+							<EmptyState
+								icon={FolderOpen}
+								title="This folder is empty"
+								description="Upload a file or create a folder to get started."
+								action={
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => setDialog({ type: "upload" })}
+									>
+										<Upload data-icon="inline-start" aria-hidden="true" />
+										Upload file
+									</Button>
+								}
+							/>
+						</TableCell>
+					</TableRow>
+				</>
+			);
+		}
+
+		return (
+			<>
+				{goBackRow}
+				{entries.map(renderEntryRow)}
+			</>
+		);
+	}
 
 	return (
 		<>
-			<div className="space-y-4">
+			<div className="flex flex-col gap-4">
 				<PageHeader
 					title="Files"
-					description="Browse company folders and manage file operations."
+					description="Browse company folders and manage shared files."
 					actions={
-						connection?.isSuperAdmin ? (
-							<CreateCompanyDialog
-								onCreated={(message) => toast.success(message)}
-								disabled={isFetching}
-							/>
-						) : undefined
+						<>
+							{connection?.isSuperAdmin ? (
+								<CreateCompanyDialog
+									onCreated={(message) => toast.success(message)}
+								/>
+							) : null}
+							<Button
+								variant="outline"
+								onClick={() => setDialog({ type: "newFolder" })}
+							>
+								<Plus data-icon="inline-start" aria-hidden="true" />
+								New folder
+							</Button>
+							<Button
+								onClick={() => setDialog({ type: "upload" })}
+								disabled={uploadMutation.isPending}
+							>
+								<Upload data-icon="inline-start" aria-hidden="true" />
+								Upload file
+							</Button>
+						</>
 					}
 				/>
 
-				<div className="space-y-3">
+				<div className="flex items-center justify-between gap-2">
 					<Breadcrumb>
 						<BreadcrumbList>
 							{breadcrumbItems.map((crumb, index) => (
-								<span
-									key={`${crumb.label}-${index}`}
-									className="flex items-center gap-1.5"
-								>
+								<Fragment key={`${crumb.label}-${index}`}>
 									{index > 0 ? <BreadcrumbSeparator /> : null}
 									<BreadcrumbItem>
 										{index === breadcrumbItems.length - 1 ? (
@@ -556,114 +528,52 @@ export function FileManagerConsole() {
 											</BreadcrumbLink>
 										)}
 									</BreadcrumbItem>
-								</span>
+								</Fragment>
 							))}
 						</BreadcrumbList>
 					</Breadcrumb>
-
-					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setDialog({ type: "newFolder" })}
-						>
-							<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-							New Folder
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setDialog({ type: "upload" })}
-							disabled={uploadMutation.isPending}
-						>
-							<Upload className="mr-2 h-4 w-4" aria-hidden="true" />
-							Upload File
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => void refreshMutation.mutateAsync()}
-							disabled={refreshMutation.isPending}
-						>
-							<RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
-							Refresh
-						</Button>
-					</div>
-
-					{uploadProgress !== null ? (
-						<div className="space-y-1.5">
-							<p className="text-sm text-muted-foreground">
-								Uploading to {destinationLabel} — {uploadProgress}%
-							</p>
-							<div className="h-1.5 w-full rounded-full bg-muted">
-								<div
-									className="h-full rounded-full bg-primary transition-[width]"
-									style={{ width: `${uploadProgress}%` }}
-								/>
-							</div>
-						</div>
-					) : null}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						onClick={() => void refetch()}
+						disabled={isRefetching}
+						aria-label="Refresh file list"
+					>
+						{isRefetching ? (
+							<Spinner aria-hidden="true" />
+						) : (
+							<RefreshCw aria-hidden="true" />
+						)}
+					</Button>
 				</div>
 
-				<Card>
-					<CardContent className="px-0 pb-0">
+				{uploadProgress !== null ? (
+					<Progress value={uploadProgress}>
+						<ProgressLabel>Uploading to {destinationLabel}</ProgressLabel>
+						<ProgressValue />
+					</Progress>
+				) : null}
+
+				<Card className="py-0">
+					<CardContent className="px-0">
 						<Table>
 							<TableHeader>
-								{table.getHeaderGroups().map((headerGroup) => (
-									<TableRow key={headerGroup.id}>
-										{headerGroup.headers.map((header) => (
-											<TableHead key={header.id}>
-												{header.isPlaceholder
-													? null
-													: flexRender(
-															header.column.columnDef.header,
-															header.getContext(),
-														)}
-											</TableHead>
-										))}
-									</TableRow>
-								))}
+								<TableRow>
+									<TableHead>Name</TableHead>
+									<TableHead className="w-28">Size</TableHead>
+									<TableHead className="w-44">Last modified</TableHead>
+									<TableHead className="w-14 text-right">
+										<span className="sr-only">Actions</span>
+									</TableHead>
+								</TableRow>
 							</TableHeader>
-							<TableBody>
-								{isFetching ? (
-									<TableRow>
-										<TableCell colSpan={4} className="py-10 text-center">
-											<Loader2
-												className="mx-auto h-5 w-5 animate-spin text-muted-foreground"
-												aria-hidden="true"
-											/>
-										</TableCell>
-									</TableRow>
-								) : table.getRowModel().rows.length === 0 ? (
-									<TableRow>
-										<TableCell
-											colSpan={4}
-											className="py-10 text-center text-sm text-muted-foreground"
-										>
-											No items in this directory.
-										</TableCell>
-									</TableRow>
-								) : (
-									table.getRowModel().rows.map((row) => (
-										<TableRow key={row.id}>
-											{row.getVisibleCells().map((cell) => (
-												<TableCell key={cell.id}>
-													{flexRender(
-														cell.column.columnDef.cell,
-														cell.getContext(),
-													)}
-												</TableCell>
-											))}
-										</TableRow>
-									))
-								)}
-							</TableBody>
+							<TableBody>{renderTableBody()}</TableBody>
 						</Table>
 					</CardContent>
 				</Card>
 			</div>
 
-			{/* New Folder dialog */}
+			{/* New folder dialog */}
 			<Dialog
 				open={dialog.type === "newFolder"}
 				onOpenChange={(open) => !open && setDialog({ type: "closed" })}
@@ -675,8 +585,8 @@ export function FileManagerConsole() {
 							This folder will be created inside {destinationLabel}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="space-y-1.5">
-						<Label htmlFor="folder-name">Folder name</Label>
+					<Field>
+						<FieldLabel htmlFor="folder-name">Folder name</FieldLabel>
 						<Input
 							id="folder-name"
 							name="folderName"
@@ -691,7 +601,7 @@ export function FileManagerConsole() {
 								}
 							}}
 						/>
-					</div>
+					</Field>
 					<DialogFooter>
 						<Button
 							variant="outline"
@@ -708,12 +618,9 @@ export function FileManagerConsole() {
 							disabled={!folderName.trim() || isDialogWorking}
 						>
 							{createFolderMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Create Folder
+							Create folder
 						</Button>
 					</DialogFooter>
 				</DialogContent>
@@ -736,8 +643,8 @@ export function FileManagerConsole() {
 							This file will be uploaded to {destinationLabel}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="space-y-2">
-						<Label htmlFor="upload-file">Select file</Label>
+					<Field>
+						<FieldLabel htmlFor="upload-file">Select file</FieldLabel>
 						<Input
 							id="upload-file"
 							type="file"
@@ -750,7 +657,7 @@ export function FileManagerConsole() {
 								}
 								if (selected.size === 0 || selected.size > MAX_UPLOAD_BYTES) {
 									setUploadFile(null);
-									toast.error("File must be between 1 byte and 1024 MB.");
+									toast.error("File must be between 1 byte and 1 GB.");
 									if (uploadInputRef.current) {
 										uploadInputRef.current.value = "";
 									}
@@ -759,11 +666,8 @@ export function FileManagerConsole() {
 								setUploadFile(selected);
 							}}
 						/>
-						<p className="text-sm text-muted-foreground">
-							Maximum file size:{" "}
-							<span className="font-medium text-foreground">1 GB</span>
-						</p>
-					</div>
+						<FieldDescription>Maximum file size: 1 GB</FieldDescription>
+					</Field>
 					<DialogFooter>
 						<Button
 							variant="outline"
@@ -782,7 +686,7 @@ export function FileManagerConsole() {
 									uploadFile.size === 0 ||
 									uploadFile.size > MAX_UPLOAD_BYTES
 								) {
-									toast.error("File must be between 1 byte and 1024 MB.");
+									toast.error("File must be between 1 byte and 1 GB.");
 									return;
 								}
 								void uploadMutation.mutateAsync(uploadFile);
@@ -790,10 +694,7 @@ export function FileManagerConsole() {
 							disabled={!uploadFile || isDialogWorking}
 						>
 							{uploadMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
 							Upload
 						</Button>
@@ -814,8 +715,8 @@ export function FileManagerConsole() {
 							{dialog.type === "rename" ? dialog.entry.name : "this item"}.
 						</DialogDescription>
 					</DialogHeader>
-					<div className="space-y-1.5">
-						<Label htmlFor="rename-name">New name</Label>
+					<Field>
+						<FieldLabel htmlFor="rename-name">New name</FieldLabel>
 						<Input
 							id="rename-name"
 							name="renameName"
@@ -823,7 +724,7 @@ export function FileManagerConsole() {
 							value={renameName}
 							onChange={(event) => setRenameName(event.target.value)}
 						/>
-					</div>
+					</Field>
 					<DialogFooter>
 						<Button
 							variant="outline"
@@ -851,10 +752,7 @@ export function FileManagerConsole() {
 							}
 						>
 							{renameMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
 							Save
 						</Button>
@@ -869,7 +767,7 @@ export function FileManagerConsole() {
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Delete item</AlertDialogTitle>
+						<AlertDialogTitle>Delete item?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This will permanently remove{" "}
 							<span className="font-medium text-foreground">
@@ -892,10 +790,7 @@ export function FileManagerConsole() {
 							disabled={dialog.type !== "delete" || deleteMutation.isPending}
 						>
 							{deleteMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
 							Delete
 						</AlertDialogAction>

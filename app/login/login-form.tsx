@@ -48,7 +48,7 @@ function getAuthErrorMessage(error?: string): string {
 export function LoginForm({
 	isDev,
 	hasCognito,
-	callbackUrl = "/uploads",
+	callbackUrl = "/files",
 	authError,
 }: LoginFormProps) {
 	const [email, setEmail] = useState("");
@@ -99,8 +99,7 @@ export function LoginForm({
 		if (result?.error) {
 			setError("Login failed.");
 		} else {
-			// Dev quick-logins land on the files page to see mock data immediately
-			router.push(callbackUrl === "/uploads" ? "/files" : callbackUrl);
+			router.push(callbackUrl);
 		}
 		setIsLoading(false);
 	}
@@ -113,10 +112,10 @@ export function LoginForm({
 						<span className="text-lg font-bold text-primary-foreground">N</span>
 					</div>
 					<h1 className="mt-4 text-2xl font-semibold tracking-tight">
-						Navara File Portal
+						Navara Portal
 					</h1>
 					<p className="mt-1 text-sm text-muted-foreground">
-						Sign in to access the secure file sharing portal.
+						Sign in to access your files and imports.
 					</p>
 				</div>
 

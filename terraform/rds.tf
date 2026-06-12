@@ -13,7 +13,7 @@ resource "random_password" "db_password" {
 resource "aws_secretsmanager_secret" "db_url" {
   name                    = "${var.project_name}/database-url"
   recovery_window_in_days = 0
-  tags                    = local.common_tags
+  tags                    = local.tags_database
 }
 
 resource "aws_secretsmanager_secret_version" "db_url" {
@@ -40,11 +40,11 @@ resource "aws_security_group" "rds" {
   }
 
   ingress {
-    description = "PostgreSQL from internet (ODBC)"
+    description = "PostgreSQL from allowed CIDRs (ODBC)"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.db_public_cidr_blocks
   }
 
   egress {
@@ -54,35 +54,36 @@ resource "aws_security_group" "rds" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = local.common_tags
+  tags = local.tags_database
 }
 
 # Use the default VPC's public subnets so publicly_accessible = true gets a public endpoint.
 resource "aws_db_subnet_group" "rds" {
   name       = "${var.project_name}-rds-subnet-group"
   subnet_ids = data.aws_subnets.default.ids
-  tags       = local.common_tags
+  tags       = local.tags_database
 }
 
 resource "aws_db_instance" "excel" {
-  identifier              = "${var.project_name}-excel"
-  engine                  = "postgres"
-  engine_version          = "16"
-  instance_class          = var.db_instance_class
-  allocated_storage       = 20
-  max_allocated_storage   = 500
-  db_name                 = var.db_name
-  username                = var.db_username
-  password                = random_password.db_password.result
-  publicly_accessible     = true
-  vpc_security_group_ids  = [aws_security_group.rds.id]
-  db_subnet_group_name    = aws_db_subnet_group.rds.name
-  skip_final_snapshot     = true
-  storage_encrypted       = true
-  deletion_protection     = false
-  backup_retention_period = var.db_backup_retention_period
+  identifier                = "${var.project_name}-excel"
+  engine                    = "postgres"
+  engine_version            = "16"
+  instance_class            = var.db_instance_class
+  allocated_storage         = 20
+  max_allocated_storage     = 500
+  db_name                   = var.db_name
+  username                  = var.db_username
+  password                  = random_password.db_password.result
+  publicly_accessible       = true
+  vpc_security_group_ids    = [aws_security_group.rds.id]
+  db_subnet_group_name      = aws_db_subnet_group.rds.name
+  skip_final_snapshot       = var.db_skip_final_snapshot
+  final_snapshot_identifier = "${var.project_name}-excel-final"
+  storage_encrypted         = true
+  deletion_protection       = var.db_deletion_protection
+  backup_retention_period   = var.db_backup_retention_period
 
-  tags = local.common_tags
+  tags = local.tags_database
 }
 
 # -----------------------------------------------------------------------------
@@ -103,7 +104,7 @@ resource "aws_security_group" "excel_parser" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = local.common_tags
+  tags = local.tags_database
 }
 
 resource "aws_iam_role" "excel_parser_lambda" {
@@ -118,7 +119,7 @@ resource "aws_iam_role" "excel_parser_lambda" {
     }]
   })
 
-  tags = local.common_tags
+  tags = local.tags_database
 }
 
 resource "aws_iam_role_policy_attachment" "excel_parser_basic" {
@@ -173,7 +174,7 @@ data "archive_file" "excel_parser" {
 resource "aws_cloudwatch_log_group" "excel_parser" {
   name              = "/aws/lambda/${var.project_name}-excel-parser"
   retention_in_days = var.log_retention_days
-  tags              = local.common_tags
+  tags              = local.tags_database
 }
 
 resource "aws_lambda_function" "excel_parser" {
@@ -196,9 +197,11 @@ resource "aws_lambda_function" "excel_parser" {
     }
   }
 
+  # Empty lists detach the function from the VPC (removing the block alone
+  # would not). RDS is reachable either way via its public endpoint.
   vpc_config {
-    subnet_ids         = aws_subnet.private[*].id
-    security_group_ids = [aws_security_group.excel_parser.id]
+    subnet_ids         = var.enable_lambda_vpc ? aws_subnet.private[*].id : []
+    security_group_ids = var.enable_lambda_vpc ? [aws_security_group.excel_parser.id] : []
   }
 
   depends_on = [
@@ -206,7 +209,7 @@ resource "aws_lambda_function" "excel_parser" {
     aws_iam_role_policy_attachment.excel_parser_vpc,
   ]
 
-  tags = local.common_tags
+  tags = local.tags_database
 }
 
 resource "aws_lambda_permission" "s3_invoke_excel_parser" {

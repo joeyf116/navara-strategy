@@ -44,7 +44,11 @@ export async function GET() {
 
 	const sftpEndpoint = process.env.SFTP_ENDPOINT ?? "";
 	const appUrl = process.env.NEXTAUTH_URL ?? process.env.AUTH_URL ?? "";
-	const webdavUrl = appUrl ? `${appUrl}/api/dav` : "";
+	// WEBDAV_URL is set explicitly in Terraform (defaults to Lambda Function URL)
+	// so that the WebDAV path bypasses CloudFront's method-validation layer when
+	// the Lambda@Edge behavior hasn't been deployed yet.
+	const webdavUrl =
+		process.env.WEBDAV_URL?.trim() || (appUrl ? `${appUrl}/api/dav` : "");
 	const companyAccess = await resolveUserCompanyAccess(email);
 	const database = companyAccess.isSuperAdmin
 		? buildDatabaseConnectionInfo()

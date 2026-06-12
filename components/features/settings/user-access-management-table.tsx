@@ -4,14 +4,18 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	Building2,
-	Loader2,
 	MoreHorizontal,
 	Plus,
 	Search,
 	Trash2,
+	UserPlus,
 	Users,
 } from "lucide-react";
 
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorState } from "@/components/shared/error-state";
+import { TableSkeletonRows } from "@/components/shared/table-skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -26,13 +30,6 @@ import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
@@ -54,6 +51,7 @@ import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
+	SelectGroup,
 	SelectItem,
 	SelectTrigger,
 	SelectValue,
@@ -220,11 +218,15 @@ export function UserAccessManagementTable() {
 		queryFn: () => requestJson("/api/settings/company-access"),
 	});
 
-	const { data: usersPayload = null, isFetching: usersLoading } =
-		useQuery<CognitoUsersResponse>({
-			queryKey: ["company-access-users"],
-			queryFn: () => requestJson("/api/settings/company-access/users"),
-		});
+	const {
+		data: usersPayload = null,
+		isLoading: usersLoading,
+		isError: usersError,
+		refetch: refetchUsers,
+	} = useQuery<CognitoUsersResponse>({
+		queryKey: ["company-access-users"],
+		queryFn: () => requestJson("/api/settings/company-access/users"),
+	});
 
 	async function invalidateQueries() {
 		await queryClient.invalidateQueries({ queryKey: ["company-access"] });
@@ -518,249 +520,255 @@ export function UserAccessManagementTable() {
 
 	return (
 		<>
-			<Card>
-				<CardHeader className="border-b border-border">
-					<CardTitle>User Management</CardTitle>
-					<CardDescription>
-						Create Cognito-backed users, remove users, and manage company
-						access.
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="space-y-4 p-4">
-					<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-						<div className="flex flex-1 flex-col gap-3 sm:flex-row">
-							<div className="relative flex-1">
-								<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-								<Input
-									id="user-management-search"
-									type="search"
-									value={search}
-									onChange={(event) => setSearch(event.target.value)}
-									placeholder="Search users by name or email"
-									className="pl-9"
-								/>
-							</div>
-							<Select
-								value={statusFilter}
-								onValueChange={(value) =>
-									setStatusFilter(value as UserStatusFilter)
-								}
-							>
-								<SelectTrigger className="w-full sm:w-44">
-									<SelectValue placeholder="All statuses" />
-								</SelectTrigger>
-								<SelectContent>
+			<div className="space-y-4">
+				<div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+					<div className="flex flex-1 flex-col gap-3 sm:flex-row">
+						<div className="relative flex-1">
+							<Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Input
+								id="user-management-search"
+								type="search"
+								value={search}
+								onChange={(event) => setSearch(event.target.value)}
+								placeholder="Search users by name or email"
+								className="pl-9"
+							/>
+						</div>
+						<Select
+							value={statusFilter}
+							onValueChange={(value) =>
+								setStatusFilter(value as UserStatusFilter)
+							}
+							items={{
+								all: "All statuses",
+								active: "Active",
+								pending: "Temp password",
+								disabled: "Disabled",
+							}}
+						>
+							<SelectTrigger className="w-full sm:w-44">
+								<SelectValue placeholder="All statuses" />
+							</SelectTrigger>
+							<SelectContent>
+								<SelectGroup>
 									<SelectItem value="all">All statuses</SelectItem>
 									<SelectItem value="active">Active</SelectItem>
 									<SelectItem value="pending">Temp password</SelectItem>
 									<SelectItem value="disabled">Disabled</SelectItem>
-								</SelectContent>
-							</Select>
-						</div>
-						<div className="flex flex-wrap items-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => {
-									setBulkGrantDraft({});
-									setBulkCompanySearch("");
-									setBulkDialogOpen(true);
-								}}
-								disabled={selectedUserEmails.length === 0}
-							>
-								<Users className="mr-2 h-4 w-4" aria-hidden="true" />
-								Bulk Access ({selectedUserEmails.length})
-							</Button>
-							<Button size="sm" onClick={openCreateDialog}>
-								<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-								Add User
-							</Button>
-						</div>
+								</SelectGroup>
+							</SelectContent>
+						</Select>
 					</div>
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								setBulkGrantDraft({});
+								setBulkCompanySearch("");
+								setBulkDialogOpen(true);
+							}}
+							disabled={selectedUserEmails.length === 0}
+						>
+							<Users data-icon="inline-start" aria-hidden="true" />
+							Bulk access ({selectedUserEmails.length})
+						</Button>
+						<Button size="sm" onClick={openCreateDialog}>
+							<Plus data-icon="inline-start" aria-hidden="true" />
+							Add user
+						</Button>
+					</div>
+				</div>
 
-					<div className="overflow-hidden rounded-lg border border-border">
-						<Table>
-							<TableHeader>
+				<div className="overflow-hidden rounded-lg border border-border">
+					<Table>
+						<TableHeader>
+							<TableRow>
+								<TableHead className="w-10">
+									<Checkbox
+										checked={allFilteredSelected}
+										indeterminate={!allFilteredSelected && someFilteredSelected}
+										onCheckedChange={(checked) =>
+											toggleSelectAllFiltered(checked === true)
+										}
+										aria-label="Select all filtered users"
+									/>
+								</TableHead>
+								<TableHead>User</TableHead>
+								<TableHead>Status</TableHead>
+								<TableHead>Company access</TableHead>
+								<TableHead>Updated</TableHead>
+								<TableHead className="w-14 text-right">
+									<span className="sr-only">Actions</span>
+								</TableHead>
+							</TableRow>
+						</TableHeader>
+						<TableBody>
+							{usersLoading ? (
+								<TableSkeletonRows rows={5} columns={6} />
+							) : usersError ? (
 								<TableRow>
-									<TableHead className="w-10">
-										<Checkbox
-											checked={allFilteredSelected}
-											indeterminate={
-												!allFilteredSelected && someFilteredSelected
-											}
-											onCheckedChange={(checked) =>
-												toggleSelectAllFiltered(checked === true)
-											}
-											aria-label="Select all filtered users"
+									<TableCell colSpan={6} className="p-4">
+										<ErrorState
+											title="Unable to load users"
+											description="Something went wrong while loading the user list. Try again."
+											onRetry={() => void refetchUsers()}
 										/>
-									</TableHead>
-									<TableHead>User</TableHead>
-									<TableHead>Status</TableHead>
-									<TableHead>Company Access</TableHead>
-									<TableHead>Updated</TableHead>
-									<TableHead className="w-14 text-right">
-										<span className="sr-only">Actions</span>
-									</TableHead>
+									</TableCell>
 								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{usersLoading ? (
-									<TableRow>
-										<TableCell colSpan={6} className="py-10 text-center">
-											<Loader2
-												className="mx-auto h-5 w-5 animate-spin text-muted-foreground"
-												aria-hidden="true"
-											/>
-										</TableCell>
-									</TableRow>
-								) : filteredUsers.length === 0 ? (
-									<TableRow>
-										<TableCell
-											colSpan={6}
-											className="py-10 text-center text-sm text-muted-foreground"
+							) : users.length === 0 ? (
+								<TableRow>
+									<TableCell colSpan={6}>
+										<EmptyState
+											icon={UserPlus}
+											title="No users yet"
+											description="Create the first user to grant portal and SFTP access."
+											action={
+												<Button size="sm" onClick={openCreateDialog}>
+													<Plus data-icon="inline-start" aria-hidden="true" />
+													Add user
+												</Button>
+											}
+										/>
+									</TableCell>
+								</TableRow>
+							) : filteredUsers.length === 0 ? (
+								<TableRow>
+									<TableCell
+										colSpan={6}
+										className="py-10 text-center text-sm text-muted-foreground"
+									>
+										No users match the current filters.
+									</TableCell>
+								</TableRow>
+							) : (
+								filteredUsers.map((user) => {
+									const grants = user.grants ?? [];
+									const selected = selectedUserEmails.includes(user.email);
+									const displayName = user.name?.trim() || user.email;
+									return (
+										<TableRow
+											key={user.username}
+											className={selected ? "bg-accent/20" : undefined}
 										>
-											No users matched the current filters.
-										</TableCell>
-									</TableRow>
-								) : (
-									filteredUsers.map((user) => {
-										const grants = user.grants ?? [];
-										const selected = selectedUserEmails.includes(user.email);
-										const displayName = user.name?.trim() || user.email;
-										const writeCount = grants.filter((g) => g.canWrite).length;
-										const readCount = grants.length - writeCount;
-										return (
-											<TableRow
-												key={user.username}
-												className={selected ? "bg-accent/20" : undefined}
-											>
-												<TableCell>
-													<Checkbox
-														checked={selected}
-														onCheckedChange={(checked) =>
-															toggleSelectedUser(user.email, checked === true)
-														}
-														aria-label={`Select ${user.email}`}
-													/>
-												</TableCell>
-												<TableCell>
-													<div className="flex items-center gap-3">
-														<Avatar className="h-8 w-8">
-															<AvatarFallback>
-																{getInitials(user.name, user.email)}
-															</AvatarFallback>
-														</Avatar>
-														<div className="min-w-0 space-y-0.5">
-															<p className="truncate font-medium text-foreground">
-																{displayName}
-															</p>
-															<p className="truncate text-xs text-muted-foreground">
-																{user.email}
-															</p>
-														</div>
+											<TableCell>
+												<Checkbox
+													checked={selected}
+													onCheckedChange={(checked) =>
+														toggleSelectedUser(user.email, checked === true)
+													}
+													aria-label={`Select ${user.email}`}
+												/>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-3">
+													<Avatar className="h-8 w-8">
+														<AvatarFallback>
+															{getInitials(user.name, user.email)}
+														</AvatarFallback>
+													</Avatar>
+													<div className="min-w-0 space-y-0.5">
+														<p className="truncate font-medium text-foreground">
+															{displayName}
+														</p>
+														<p className="truncate text-xs text-muted-foreground">
+															{user.email}
+														</p>
 													</div>
-												</TableCell>
-												<TableCell>
-													<Badge variant={statusVariant(user)}>
-														{statusLabel(user)}
-													</Badge>
-												</TableCell>
-												<TableCell>
-													{grants.length === 0 ? (
-														<span className="text-sm text-muted-foreground">
-															None
-														</span>
-													) : grants.length <= 2 ? (
-														<div className="flex flex-wrap gap-1">
-															{grants.map((grant) => (
-																<Badge
-																	key={`${user.email}:${grant.companyId}`}
-																	variant={
-																		grant.canWrite ? "success" : "outline"
-																	}
-																>
-																	{grant.companyId}
-																</Badge>
-															))}
-														</div>
-													) : (
-														<div className="flex flex-col gap-0.5">
-															<span className="text-sm font-medium">
-																{grants.length} companies
-															</span>
-															<span className="text-xs text-muted-foreground">
-																{readCount === 0
-																	? "all write"
-																	: writeCount === 0
-																		? "read only"
-																		: `${writeCount} write, ${readCount} read`}
-															</span>
-														</div>
-													)}
-												</TableCell>
-												<TableCell className="text-sm text-muted-foreground">
-													{formatTimestamp(user.updatedAt ?? user.createdAt)}
-												</TableCell>
-												<TableCell className="text-right">
-													<DropdownMenu>
-														<DropdownMenuTrigger
-															className={buttonVariants({
-																variant: "ghost",
-																size: "icon",
-															})}
-															aria-label={`Actions for ${user.email}`}
-														>
-															<MoreHorizontal
-																className="size-4"
-																aria-hidden="true"
-															/>
-														</DropdownMenuTrigger>
-														<DropdownMenuContent
-															align="end"
-															className="w-full whitespace-nowrap"
-														>
-															<DropdownMenuItem
-																onClick={() => startEdit(user.email)}
+												</div>
+											</TableCell>
+											<TableCell>
+												<Badge variant={statusVariant(user)}>
+													{statusLabel(user)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												{grants.length === 0 ? (
+													<span className="text-sm text-muted-foreground">
+														No access
+													</span>
+												) : (
+													<div className="flex flex-wrap items-center gap-1">
+														{grants.slice(0, 3).map((grant) => (
+															<Badge
+																key={`${user.email}:${grant.companyId}`}
+																variant={grant.canWrite ? "success" : "outline"}
+																className="max-w-30 truncate text-xs"
+																title={`${grant.companyId} — ${grant.canWrite ? "Read/Write" : "Read only"}`}
 															>
-																<Building2
-																	className="mr-2 size-4"
-																	aria-hidden="true"
-																/>
-																Edit Company Access
-															</DropdownMenuItem>
-															<DropdownMenuSeparator />
-															<DropdownMenuItem
-																onClick={() => setDeleteEmail(user.email)}
+																{grant.companyId}
+															</Badge>
+														))}
+														{grants.length > 3 ? (
+															<Badge
+																variant="secondary"
+																className="text-xs"
+																title={grants
+																	.slice(3)
+																	.map((g) => g.companyId)
+																	.join(", ")}
 															>
-																<Trash2
-																	className="mr-2 size-4"
-																	aria-hidden="true"
-																/>
-																Remove User
-															</DropdownMenuItem>
-														</DropdownMenuContent>
-													</DropdownMenu>
-												</TableCell>
-											</TableRow>
-										);
-									})
-								)}
-							</TableBody>
-						</Table>
-					</div>
+																+{grants.length - 3} more
+															</Badge>
+														) : null}
+													</div>
+												)}
+											</TableCell>
+											<TableCell className="text-sm text-muted-foreground">
+												{formatTimestamp(user.updatedAt ?? user.createdAt)}
+											</TableCell>
+											<TableCell className="text-right">
+												<DropdownMenu>
+													<DropdownMenuTrigger
+														className={buttonVariants({
+															variant: "ghost",
+															size: "icon",
+														})}
+														aria-label={`Actions for ${user.email}`}
+													>
+														<MoreHorizontal
+															className="size-4"
+															aria-hidden="true"
+														/>
+													</DropdownMenuTrigger>
+													<DropdownMenuContent
+														align="end"
+														className="w-full whitespace-nowrap"
+													>
+														<DropdownMenuItem
+															onClick={() => startEdit(user.email)}
+														>
+															<Building2 aria-hidden="true" />
+															Edit company access
+														</DropdownMenuItem>
+														<DropdownMenuSeparator />
+														<DropdownMenuItem
+															onClick={() => setDeleteEmail(user.email)}
+														>
+															<Trash2 aria-hidden="true" />
+															Remove user
+														</DropdownMenuItem>
+													</DropdownMenuContent>
+												</DropdownMenu>
+											</TableCell>
+										</TableRow>
+									);
+								})
+							)}
+						</TableBody>
+					</Table>
+				</div>
 
-					<div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-						<p>
-							Showing {filteredUsers.length} of {users.length} user
-							{users.length === 1 ? "" : "s"}
-						</p>
-						<p>
-							New users are created in Cognito with the temporary password you
-							set.
-						</p>
-					</div>
-				</CardContent>
-			</Card>
+				<div className="flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+					<p>
+						Showing {filteredUsers.length} of {users.length} user
+						{users.length === 1 ? "" : "s"}
+					</p>
+					<p>
+						New users are created in Cognito with a temporary password you set.
+					</p>
+				</div>
+			</div>
 
 			{/* Edit company access dialog */}
 			<Dialog
@@ -775,7 +783,7 @@ export function UserAccessManagementTable() {
 			>
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
-						<DialogTitle>Edit Company Access</DialogTitle>
+						<DialogTitle>Edit company access</DialogTitle>
 						<DialogDescription>
 							{editingUser?.email ?? "Selected user"}
 						</DialogDescription>
@@ -809,12 +817,9 @@ export function UserAccessManagementTable() {
 							disabled={saveUserAccessMutation.isPending || !editingEmail}
 						>
 							{saveUserAccessMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Save Access
+							Save access
 						</Button>
 					</DialogFooter>
 				</DialogContent>
@@ -833,7 +838,7 @@ export function UserAccessManagementTable() {
 			>
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
-						<DialogTitle>Bulk Update Company Access</DialogTitle>
+						<DialogTitle>Bulk update company access</DialogTitle>
 						<DialogDescription>
 							Apply the same grants to {selectedUserEmails.length} selected user
 							{selectedUserEmails.length === 1 ? "" : "s"}. Existing grants will
@@ -872,12 +877,9 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{saveBulkAccessMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Apply to Selected Users
+							Apply to selected users
 						</Button>
 					</DialogFooter>
 				</DialogContent>
@@ -893,7 +895,7 @@ export function UserAccessManagementTable() {
 			>
 				<DialogContent className="max-w-2xl">
 					<DialogHeader>
-						<DialogTitle>Create User</DialogTitle>
+						<DialogTitle>Create user</DialogTitle>
 						<DialogDescription>
 							Creates the user in Cognito with a temporary password and optional
 							company access.
@@ -996,12 +998,9 @@ export function UserAccessManagementTable() {
 							}
 						>
 							{createUserMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Create User
+							Create user
 						</Button>
 					</DialogFooter>
 				</DialogContent>
@@ -1014,7 +1013,7 @@ export function UserAccessManagementTable() {
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Remove user</AlertDialogTitle>
+						<AlertDialogTitle>Remove user?</AlertDialogTitle>
 						<AlertDialogDescription>
 							This deletes the Cognito user and clears all stored company-access
 							metadata for{" "}
@@ -1034,12 +1033,9 @@ export function UserAccessManagementTable() {
 							disabled={deleteUserMutation.isPending || !deleteEmail}
 						>
 							{deleteUserMutation.isPending ? (
-								<Loader2
-									className="mr-2 h-4 w-4 animate-spin"
-									aria-hidden="true"
-								/>
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Remove User
+							Remove user
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

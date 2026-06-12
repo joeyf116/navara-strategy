@@ -1,4 +1,4 @@
-import { FileManagerConsole } from "@/components/file-manager-console";
+import { FileManagerConsole } from "@/components/features/files/file-manager-console";
 
 export default function FilesPage() {
 	return <FileManagerConsole />;

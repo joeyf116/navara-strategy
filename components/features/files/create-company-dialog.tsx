@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 
 type CognitoUsersResponse = {
 	users: Array<{
@@ -132,12 +133,11 @@ export function CreateCompanyDialog({
 		<>
 			<Button
 				variant="outline"
-				size="sm"
 				onClick={() => setOpen(true)}
 				disabled={disabled}
 			>
-				<Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-				Create Company
+				<Plus data-icon="inline-start" aria-hidden="true" />
+				Create company
 			</Button>
 
 			<Dialog
@@ -240,9 +240,9 @@ export function CreateCompanyDialog({
 							disabled={!companyName.trim() || createCompanyMutation.isPending}
 						>
 							{createCompanyMutation.isPending ? (
-								<Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+								<Spinner data-icon="inline-start" aria-hidden="true" />
 							) : null}
-							Create Company
+							Create company
 						</Button>
 					</DialogFooter>
 				</DialogContent>

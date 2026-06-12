@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	Clock,
-	Copy,
 	FileSpreadsheet,
-	Loader2,
 	UploadCloud,
 	XCircle,
 } from "lucide-react";
@@ -16,13 +15,13 @@ import { PageHeader } from "@/components/common/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+	Progress,
+	ProgressLabel,
+	ProgressValue,
+} from "@/components/ui/progress";
+import { Spinner } from "@/components/ui/spinner";
 import type { ImportJob } from "@/lib/excel-upload";
 
 const MAX_BYTES = 1_073_741_824; // 1 GiB
@@ -42,12 +41,6 @@ type PresignResponse = {
 	contentType: string;
 };
 type StatusResponse = { job: ImportJob };
-type ConnectionInfo = {
-	isSuperAdmin: boolean;
-	database: {
-		connectionString: string;
-	} | null;
-};
 
 async function requestPresignedUrl(file: File): Promise<PresignResponse> {
 	const res = await fetch("/api/excel-upload/presign", {
@@ -77,7 +70,7 @@ function uploadToS3(
 			if (xhr.status >= 200 && xhr.status < 300) {
 				resolve();
 			} else {
-				reject(new Error(`S3 upload failed with HTTP ${xhr.status}.`));
+				reject(new Error(`Upload failed (HTTP ${xhr.status}).`));
 			}
 		};
 		xhr.onerror = () =>
@@ -102,9 +95,6 @@ export default function ExcelImportPage() {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [errorMsg, setErrorMsg] = useState("");
 	const [dragOver, setDragOver] = useState(false);
-	const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">(
-		"idle",
-	);
 
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,22 +106,6 @@ export default function ExcelImportPage() {
 			),
 		enabled: phase === "processing" && !!jobId,
 		refetchInterval: 3_000,
-	});
-
-	const { data: connectionInfo = null } = useQuery<ConnectionInfo>({
-		queryKey: ["connection-info"],
-		queryFn: async () => {
-			const response = await fetch("/api/settings/connection-info");
-			const payload = (await response
-				.json()
-				.catch(() => ({}))) as ConnectionInfo & {
-				error?: string;
-			};
-			if (!response.ok) {
-				throw new Error(payload.error ?? "Failed to load connection info.");
-			}
-			return payload;
-		},
 	});
 
 	const jobStatus = jobData?.job?.status;
@@ -209,62 +183,17 @@ export default function ExcelImportPage() {
 		if (fileInputRef.current) fileInputRef.current.value = "";
 	}, []);
 
-	const handleCopyConnectionString = useCallback(async () => {
-		const value = connectionInfo?.database?.connectionString;
-		if (!value) return;
-		try {
-			await navigator.clipboard.writeText(value);
-			setCopyStatus("copied");
-			setTimeout(() => setCopyStatus("idle"), 1500);
-		} catch {
-			setCopyStatus("failed");
-			setTimeout(() => setCopyStatus("idle"), 2000);
-		}
-	}, [connectionInfo?.database?.connectionString]);
-
 	return (
-		<div className="space-y-6">
+		<div className="flex flex-col gap-6">
 			<PageHeader
 				title="Excel Import"
-				description="Upload an Excel file to import its rows into the PostgreSQL database."
+				description="Upload an Excel file to import its rows into the database."
 			/>
-
-			{connectionInfo?.isSuperAdmin && connectionInfo.database ? (
-				<Card>
-					<CardHeader>
-						<CardTitle className="text-sm">Database Connection String</CardTitle>
-						<CardDescription>
-							Use this with psql or your SQL client.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className="space-y-3">
-						<p className="break-all rounded-md bg-muted px-3 py-2 font-mono text-xs text-foreground">
-							{connectionInfo.database.connectionString}
-						</p>
-						<div className="flex items-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={() => void handleCopyConnectionString()}
-							>
-								<Copy className="mr-2 h-4 w-4" />
-								Copy connection string
-							</Button>
-							{copyStatus === "copied" ? (
-								<span className="text-xs text-muted-foreground">Copied</span>
-							) : null}
-							{copyStatus === "failed" ? (
-								<span className="text-xs text-destructive">Copy failed</span>
-							) : null}
-						</div>
-					</CardContent>
-				</Card>
-			) : null}
 
 			{currentPhase === "done" && (
 				<Card>
-					<CardContent className="flex flex-col items-center gap-4 py-14">
-						<CheckCircle2 className="h-16 w-16 text-success" />
+					<CardContent className="flex flex-col items-center gap-4 py-12">
+						<CheckCircle2 className="size-10 text-success" aria-hidden="true" />
 						<div className="text-center">
 							<p className="text-lg font-semibold">Import complete</p>
 							{jobData?.job?.rowCount != null && (
@@ -276,6 +205,16 @@ export default function ExcelImportPage() {
 									.
 								</p>
 							)}
+							<p className="mt-1 text-sm text-muted-foreground">
+								Database connection details are available in{" "}
+								<Link
+									href="/settings"
+									className="underline underline-offset-4 hover:text-foreground"
+								>
+									Settings
+								</Link>
+								.
+							</p>
 						</div>
 						<Button onClick={reset}>Import another file</Button>
 					</CardContent>
@@ -283,27 +222,29 @@ export default function ExcelImportPage() {
 			)}
 
 			{currentPhase === "error" && (
-				<div className="space-y-4">
+				<div className="flex flex-col gap-4">
 					<Alert variant="destructive">
-						<XCircle className="h-4 w-4" />
+						<XCircle aria-hidden="true" />
 						<AlertTitle>Import failed</AlertTitle>
 						<AlertDescription>{currentErrorMessage}</AlertDescription>
 					</Alert>
-					<Button variant="outline" onClick={reset}>
-						Try again
-					</Button>
+					<div>
+						<Button variant="outline" onClick={reset}>
+							Try again
+						</Button>
+					</div>
 				</div>
 			)}
 
 			{currentPhase === "processing" && (
 				<Card>
-					<CardContent className="flex flex-col items-center gap-4 py-14">
-						<Loader2 className="h-16 w-16 animate-spin text-primary" />
-						<div className="space-y-1 text-center">
-							<p className="text-lg font-semibold">Processing…</p>
+					<CardContent className="flex flex-col items-center gap-4 py-12">
+						<Spinner className="size-8 text-primary" aria-hidden="true" />
+						<div className="flex flex-col gap-1 text-center">
+							<p className="text-lg font-semibold">Processing import</p>
 							<p className="text-sm text-muted-foreground">
-								Parsing rows and writing to the database. Large files can take
-								several minutes.
+								Reading rows and writing them to the database. Large files can
+								take several minutes — you can leave this page open.
 							</p>
 							{selectedFile && (
 								<p className="text-sm text-muted-foreground">
@@ -313,8 +254,8 @@ export default function ExcelImportPage() {
 							{jobData?.job?.status === "pending" && (
 								<div className="mt-2 flex justify-center">
 									<Badge variant="outline">
-										<Clock className="mr-1 h-3 w-3" />
-										Waiting for processing slot…
+										<Clock aria-hidden="true" />
+										Queued for processing
 									</Badge>
 								</div>
 							)}
@@ -325,20 +266,15 @@ export default function ExcelImportPage() {
 
 			{currentPhase === "uploading" && (
 				<Card>
-					<CardContent className="flex flex-col items-center gap-6 py-14">
-						<UploadCloud className="h-16 w-16 text-primary" />
-						<div className="w-full max-w-sm space-y-3 text-center">
-							<p className="font-semibold">
-								Uploading{" "}
-								<span className="text-muted-foreground">{selectedFile?.name}</span>
-							</p>
-							<div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-								<div
-									className="h-full rounded-full bg-primary transition-all duration-300"
-									style={{ width: `${uploadPct}%` }}
-								/>
-							</div>
-							<p className="text-sm text-muted-foreground">{uploadPct}%</p>
+					<CardContent className="flex flex-col items-center gap-6 py-12">
+						<UploadCloud className="size-10 text-primary" aria-hidden="true" />
+						<div className="w-full max-w-sm">
+							<Progress value={uploadPct}>
+								<ProgressLabel className="truncate">
+									Uploading {selectedFile?.name}
+								</ProgressLabel>
+								<ProgressValue />
+							</Progress>
 						</div>
 					</CardContent>
 				</Card>
@@ -346,17 +282,17 @@ export default function ExcelImportPage() {
 
 			{currentPhase === "presigning" && (
 				<Card>
-					<CardContent className="flex flex-col items-center gap-4 py-14">
-						<Loader2 className="h-16 w-16 animate-spin text-primary" />
+					<CardContent className="flex flex-col items-center gap-4 py-12">
+						<Spinner className="size-8 text-primary" aria-hidden="true" />
 						<p className="text-sm text-muted-foreground">Preparing upload…</p>
 					</CardContent>
 				</Card>
 			)}
 
 			{currentPhase === "idle" && (
-				<div className="space-y-4">
+				<div className="flex flex-col gap-4">
 					<div
-						className={`flex flex-col items-center gap-6 rounded-lg border-2 border-dashed px-6 py-16 transition-colors ${
+						className={`flex flex-col items-center gap-6 rounded-xl border-2 border-dashed px-6 py-14 transition-colors ${
 							dragOver
 								? "border-primary bg-primary/5"
 								: "border-border hover:border-primary/40 hover:bg-muted/20"
@@ -368,14 +304,16 @@ export default function ExcelImportPage() {
 						onDragLeave={() => setDragOver(false)}
 						onDrop={handleDrop}
 					>
-						<FileSpreadsheet className="h-16 w-16 text-muted-foreground" />
-						<div className="space-y-1 text-center">
-							<p className="text-lg font-semibold">Drop your Excel file here</p>
+						<FileSpreadsheet
+							className="size-10 text-muted-foreground"
+							aria-hidden="true"
+						/>
+						<div className="flex flex-col gap-1 text-center">
+							<p className="text-lg font-semibold">
+								Drop your Excel file here
+							</p>
 							<p className="text-sm text-muted-foreground">
-								Supports{" "}
-								<span className="font-medium text-foreground">.xlsx</span> and{" "}
-								<span className="font-medium text-foreground">.xls</span> — up to{" "}
-								<span className="font-medium text-foreground">1 GB</span>
+								Accepts .xlsx and .xls files up to 1 GB.
 							</p>
 						</div>
 						<input
@@ -386,36 +324,33 @@ export default function ExcelImportPage() {
 							onChange={handleFileChange}
 						/>
 						<Button onClick={() => fileInputRef.current?.click()}>
-							<UploadCloud className="mr-2 h-4 w-4" />
+							<UploadCloud data-icon="inline-start" aria-hidden="true" />
 							Select file
 						</Button>
 					</div>
 
-					<Card>
-						<CardHeader>
-							<CardTitle className="text-sm">How it works</CardTitle>
-							<CardDescription>
-								Files are never routed through the web server.
-							</CardDescription>
-						</CardHeader>
-						<CardContent className="text-sm text-muted-foreground">
-							<ol className="list-inside list-decimal space-y-1">
-								<li>Select or drop an Excel file (.xlsx or .xls, up to 1 GB).</li>
-								<li>
-									The file uploads directly to S3 via a presigned URL — no web
-									server payload limit applies.
-								</li>
-								<li>
-									A background worker parses each row and batch-inserts into
-									PostgreSQL in chunks of 500 rows.
-								</li>
-								<li>
-									Connect to the database with any ODBC client when the import
-									completes.
-								</li>
-							</ol>
-						</CardContent>
-					</Card>
+					<div className="flex flex-col gap-1 text-sm text-muted-foreground">
+						<p className="font-medium text-foreground">How it works</p>
+						<ol className="list-inside list-decimal flex flex-col gap-1">
+							<li>Select or drop an Excel file (.xlsx or .xls, up to 1 GB).</li>
+							<li>The file uploads securely and is processed automatically.</li>
+							<li>
+								Each row is imported into the database. You can track progress
+								on this page.
+							</li>
+							<li>
+								When the import completes, the data is ready to query — find
+								connection details in{" "}
+								<Link
+									href="/settings"
+									className="underline underline-offset-4 hover:text-foreground"
+								>
+									Settings
+								</Link>
+								.
+							</li>
+						</ol>
+					</div>
 				</div>
 			)}
 		</div>
